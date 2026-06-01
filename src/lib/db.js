@@ -8,7 +8,7 @@ export const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_K
 export async function signInWithGoogle() {
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
-    options: { redirectTo: window.location.origin },
+    options: { redirectTo: 'https://dungoonanddragoon.github.io/Homebrew-Sheets/' },
   });
   if (error) throw error;
 }
