@@ -29,8 +29,7 @@ function mutate(fn) {
   fn();
   derived = deriveStats(buildCharacterForCalc());
   scheduleAutoSave();
-  renderSheet();
-}
+  renderSheetUI();}
 
 function buildCharacterForCalc() {
   const inv = data.inventory || [];
@@ -74,10 +73,10 @@ export async function renderSheet(container, characterId, uid, dm, navigate) {
     if (data.nerveDiceCurrent === undefined) data.nerveDiceCurrent = nd.count;
   }
 
-  renderSheet();
+  renderSheetUI();
 }
 
-function renderSheet() {
+function renderSheetUI() {
   const container = document.getElementById('page-content');
   if (!container) return;
 
@@ -227,7 +226,7 @@ function renderSheet() {
 
   // Tabs
   container.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => { activeTab = tab.dataset.tab; renderSheet(); });
+    tab.addEventListener('click', () => { activeTab = tab.dataset.tab; renderSheetUI(); });
   });
 
   // Render tab content
