@@ -315,7 +315,11 @@ export async function renderCharacterCreation(container, userId, navigate) {
 
   function validateStep() {
     if (step === 1 && !draft.name.trim()) { alert('Please enter a character name.'); return false; }
-    if (step === 3 && draft.level >= 3 && !draft.archetypeId) { alert('Please choose an archetype.'); return false; }
+    // Archetype only required at level 3+
+    if (step === 3 && draft.level >= 3 && !draft.archetypeId) {
+      alert('Please choose an archetype. If starting below level 3, set your level on step 1 first.');
+      return false;
+    }
     if (step === 4) {
       const count = OUTLAW.skillChoices.count;
       if (draft.skillProficiencies.length < count) { alert(`Please choose ${count} skill proficiencies.`); return false; }
@@ -328,6 +332,8 @@ export async function renderCharacterCreation(container, userId, navigate) {
     try {
       const hp = draft.maxHPOverride || maxHP({ level: draft.level, abilities: draft.abilities, classId: draft.classId });
       const archObj = draft.archetypeId ? OUTLAW.archetypes[draft.archetypeId] : null;
+      // Nerve dice only available from level 2+
+      const ndMax = draft.level >= 2 ? (OUTLAW.progression.find(p => p.level === draft.level)?.nerveDiceCount || 0) : 0;
       const characterData = {
         name: draft.name,
         class_id: draft.classId,
@@ -343,7 +349,8 @@ export async function renderCharacterCreation(container, userId, navigate) {
           currentHP: draft.currentHP ?? hp,
           maxHPOverride: draft.maxHPOverride,
           tempHP: 0,
-          nerveDiceCurrent: 0,
+          nerveDiceCurrent: ndMax,
+          nerveDiceMax: ndMax,
           spellSlotsUsed: {},
           conditions: [],
           deathSaves: { successes: 0, failures: 0 },
