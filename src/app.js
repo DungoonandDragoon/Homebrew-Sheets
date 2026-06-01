@@ -118,10 +118,10 @@ export function rollDice(count, sides) {
 }
 
 // Send roll result to DnDBeyond via extension
-export function sendRollToDnDBeyond(label, total, breakdown) {
+export function sendRollToDnDBeyond(label, total, breakdown, characterName) {
   window.postMessage({
     type: 'HOMEBREW_SHEET_ROLL',
-    payload: { label, total, breakdown, timestamp: Date.now() },
+    payload: { label, total, breakdown, characterName: characterName || 'Homebrew Sheet', timestamp: Date.now() },
   }, '*');
   showRollToast(label, total, breakdown);
 }
