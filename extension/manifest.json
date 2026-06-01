@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Homebrew Sheet → DnDBeyond",
+  "version": "1.0.0",
+  "description": "Sends rolls from the Homebrew Sheet into DnDBeyond's game log.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.dndbeyond.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.dndbeyond.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["YOUR_GITHUB_PAGES_URL/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Homebrew Sheet"
+  },
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
