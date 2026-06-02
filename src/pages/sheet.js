@@ -182,7 +182,18 @@ function renderSheetUI() {
 
   document.getElementById('hp-dmg')?.addEventListener('click', () => {
     const amt = parseInt(prompt('Damage amount?') || '0');
-    if (!isNaN(amt) && amt > 0) mutate(() => { data.currentHP = Math.max(0, (data.currentHP ?? mhp) - amt); });
+    if (!isNaN(amt) && amt > 0) mutate(() => {
+      const temp = data.tempHP || 0;
+      if (temp > 0) {
+        // Drain temp HP first
+        const tempUsed = Math.min(temp, amt);
+        const remainder = amt - tempUsed;
+        data.tempHP = temp - tempUsed;
+        data.currentHP = Math.max(0, (data.currentHP ?? mhp) - remainder);
+      } else {
+        data.currentHP = Math.max(0, (data.currentHP ?? mhp) - amt);
+      }
+    });
   });
   document.getElementById('hp-heal')?.addEventListener('click', () => {
     const amt = parseInt(prompt('Heal amount?') || '0');
@@ -196,7 +207,7 @@ function renderSheetUI() {
     const roll = rollDie(10) + derived.mods.constitution;
     const gained = Math.max(1, roll);
     mutate(() => { data.currentHP = Math.min(mhp, (data.currentHP ?? mhp) + gained); });
-    sendRollToDnDBeyond('Hit die', gained, `1d10 + Con (${formatMod(derived.mods.constitution)})`);
+    sendRollToDnDBeyond('Hit die', gained, `1d10 + Con (${formatMod(derived.mods.constitution)})`, char.name);
   });
 
   // Death saves
@@ -295,7 +306,7 @@ function renderCoreTab(tc) {
       const ab = box.dataset.ab;
       const roll = rollDie(20);
       const total = roll + derived.mods[ab];
-      sendRollToDnDBeyond(`${ABILITY_LABELS[ab]} check`, total, `d20 (${roll}) ${formatMod(derived.mods[ab])}`);
+      sendRollToDnDBeyond(`${ABILITY_LABELS[ab]} check`, total, `d20 (${roll}) ${formatMod(derived.mods[ab])}`, char.name);
     });
   });
 
@@ -305,7 +316,7 @@ function renderCoreTab(tc) {
       const ab = row.dataset.ab;
       const roll = rollDie(20);
       const total = roll + derived.saves[ab];
-      sendRollToDnDBeyond(`${ABILITY_LABELS[ab]} save`, total, `d20 (${roll}) ${formatMod(derived.saves[ab])}`);
+      sendRollToDnDBeyond(`${ABILITY_LABELS[ab]} save`, total, `d20 (${roll}) ${formatMod(derived.saves[ab])}`, char.name);
     });
   });
 
@@ -315,7 +326,7 @@ function renderCoreTab(tc) {
       const key = row.dataset.skill;
       const roll = rollDie(20);
       const total = roll + derived.skills[key];
-      sendRollToDnDBeyond(`${SKILL_LABELS[key]}`, total, `d20 (${roll}) ${formatMod(derived.skills[key])}`);
+      sendRollToDnDBeyond(`${SKILL_LABELS[key]}`, total, `d20 (${roll}) ${formatMod(derived.skills[key])}`, char.name);
     });
   });
 }
@@ -375,14 +386,14 @@ function renderCombatTab(tc) {
     btn.addEventListener('click', () => {
       const d = parseInt(btn.dataset.d);
       const roll = rollDie(d);
-      sendRollToDnDBeyond(`d${d}`, roll, `d${d}`);
+      sendRollToDnDBeyond(`d${d}`, roll, `d${d}`, char.name);
     });
   });
 
   document.getElementById('roll-init')?.addEventListener('click', () => {
     const roll = rollDie(20);
     const total = roll + derived.initiativeBonus;
-    sendRollToDnDBeyond('Initiative', total, `d20 (${roll}) + ${derived.initiativeBonus}`);
+    sendRollToDnDBeyond('Initiative', total, `d20 (${roll}) + ${derived.initiativeBonus}`, char.name);
   });
 
   tc.querySelectorAll('.attack-btn-hit').forEach(btn => {
@@ -391,7 +402,7 @@ function renderCombatTab(tc) {
       const roll = rollDie(20);
       const total = roll + bonus;
       const isCrit = roll === 20;
-      sendRollToDnDBeyond(`Attack${isCrit?' (CRIT!)':''}`, total, `d20 (${roll}) ${formatMod(bonus)}`);
+      sendRollToDnDBeyond(`Attack${isCrit?' (CRIT!)':''}`, total, `d20 (${roll}) ${formatMod(bonus)}`, char.name);
     });
   });
 
@@ -402,7 +413,7 @@ function renderCombatTab(tc) {
       const [count, sides] = formula.split('d').map(Number);
       const { total, rolls } = rollDice(count, sides);
       const finalTotal = total + bonus;
-      sendRollToDnDBeyond('Damage', finalTotal, `${formula} (${rolls.join('+')}) ${formatMod(bonus)}`);
+      sendRollToDnDBeyond('Damage', finalTotal, `${formula} (${rolls.join('+')}) ${formatMod(bonus)}`, char.name);
     });
   });
 
@@ -594,7 +605,7 @@ function renderNerveTab(tc) {
       if (name === 'Graze') {
         const roll = rollDie(nd.dieSize);
         const total = roll + derived.mods.intelligence;
-        sendRollToDnDBeyond('Graze (damage reduction)', total, `d${nd.dieSize} (${roll}) + Int (${formatMod(derived.mods.intelligence)})`);
+        sendRollToDnDBeyond('Graze (damage reduction)', total, `d${nd.dieSize} (${roll}) + Int (${formatMod(derived.mods.intelligence)})`, char.name);
       } else {
         showMsg(`${name} used. ${cost} Nerve ${cost === 1 ? 'Die' : 'Dice'} spent.`);
       }
@@ -604,10 +615,20 @@ function renderNerveTab(tc) {
 
 // ── FEATURES TAB ──────────────────────────────────────────────────────────────
 function renderFeaturesTab(tc) {
-  const unlocked = getUnlockedFeatures(char.level, data.archetypeId);
+  // 1. Class features sorted by level
+  const unlocked = getUnlockedFeatures(char.level, data.archetypeId)
+    .sort((a, b) => a.level - b.level);
+
+  // 2. Species traits from homebrew species data
+  const speciesEntry = homebrew.find(h => h.type === 'species' && (`hb_${h.id}` === data.speciesId || h.id === data.speciesId));
+  const speciesTraits = speciesEntry?.data?.effects?.filter(e => e.type === 'passive' || e.type === 'limited-use') || [];
+
+  // 3. Feats taken (includes ASIs applied as feats)
+  const feats = data.feats || [];
 
   let html = `<div class="card" style="margin-bottom:1rem;">
     <div class="card-title">Class features · Level ${char.level}</div>
+    ${unlocked.length === 0 ? '<div style="color:var(--text-muted);">No features yet.</div>' : ''}
     ${unlocked.map(f => `
       <div class="feature-item">
         <div class="feature-name">
@@ -618,6 +639,40 @@ function renderFeaturesTab(tc) {
       </div>
     `).join('')}
   </div>`;
+
+  // Species features
+  if (speciesEntry || data.speciesId) {
+    const builtinSpeciesTraits = getBuiltinSpeciesTraits(data.speciesId);
+    const allTraits = [...builtinSpeciesTraits, ...speciesTraits];
+    if (allTraits.length > 0) {
+      html += `<div class="card" style="margin-bottom:1rem;">
+        <div class="card-title">Species traits · ${speciesEntry?.name || data.speciesId || ''}</div>
+        ${allTraits.map(t => `
+          <div class="feature-item">
+            <div class="feature-name">${t.name || t.abilityName || 'Trait'}</div>
+            <div class="feature-desc">${t.description || ''}</div>
+          </div>
+        `).join('')}
+      </div>`;
+    }
+  }
+
+  // Feats and ASIs
+  if (feats.length > 0) {
+    html += `<div class="card" style="margin-bottom:1rem;">
+      <div class="card-title">Feats & ability score improvements</div>
+      ${feats.map(f => {
+        // Show ASI effect inline if it has stat-bonus effects
+        const asiEffects = (f.effects || []).filter(e => e.type === 'stat-bonus');
+        const asiText = asiEffects.map(e => `+${e.amount} ${e.ability}`).join(', ');
+        return `<div class="feature-item">
+          <div class="feature-name">${f.name}</div>
+          ${asiText ? `<div style="font-size:0.85rem; color:var(--gold); margin-bottom:0.25rem;">${asiText}</div>` : ''}
+          <div class="feature-desc">${f.description || ''}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
 
   // Signature move picker for Gunslinger
   if (data.archetypeId === 'gunslinger' && char.level >= 7) {
@@ -649,16 +704,20 @@ function renderFeaturesTab(tc) {
     </div>`;
   }
 
-  // Upcoming features preview
-  const upcoming = Object.values(OUTLAW.features).filter(f => f.level > char.level).slice(0,3);
-  const archUpcoming = data.archetypeId
-    ? Object.values(OUTLAW.archetypes[data.archetypeId]?.features || {}).filter(f => f.level > char.level).slice(0,3)
+  // ALL upcoming features (no slice limit)
+  const allBaseFeatures = Object.values(OUTLAW.features);
+  const allArchFeatures = data.archetypeId
+    ? Object.values(OUTLAW.archetypes[data.archetypeId]?.features || {})
     : [];
-  if (upcoming.length || archUpcoming.length) {
+  const upcoming = [...allBaseFeatures, ...allArchFeatures]
+    .filter(f => f.level > char.level)
+    .sort((a, b) => a.level - b.level);
+
+  if (upcoming.length > 0) {
     html += `<div class="card">
       <div class="card-title">Upcoming features</div>
-      ${[...upcoming, ...archUpcoming].map(f => `
-        <div class="feature-item" style="opacity:0.5;">
+      ${upcoming.map(f => `
+        <div class="feature-item" style="opacity:0.45;">
           <div class="feature-name">${f.name} <span class="feature-level">Level ${f.level}</span></div>
           <div class="feature-desc">${f.description}</div>
         </div>
@@ -674,6 +733,21 @@ function renderFeaturesTab(tc) {
   document.getElementById('rune-picker')?.addEventListener('change', e => {
     mutate(() => { data.runeActive = e.target.value; });
   });
+}
+
+function getBuiltinSpeciesTraits(speciesId) {
+  const map = {
+    'human':      [{ name: 'Extra language', description: 'You can speak, read, and write one extra language.' }],
+    'elf':        [{ name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' }, { name: 'Keen senses', description: 'Proficiency in Perception.' }, { name: 'Fey ancestry', description: 'Advantage on saves against being charmed. Cannot be put to sleep by magic.' }, { name: 'Trance', description: 'You do not need to sleep. Instead you meditate deeply for 4 hours a day.' }],
+    'dwarf':      [{ name: 'Darkvision', description: 'You can see in dim light within 60 feet.' }, { name: 'Dwarven resilience', description: 'Advantage on saves against poison; resistance to poison damage.' }, { name: 'Stonecunning', description: 'Twice proficiency on History checks related to stonework.' }],
+    'halfling':   [{ name: 'Lucky', description: 'When you roll a 1 on an attack, ability check, or save, reroll and use the new result.' }, { name: 'Brave', description: 'Advantage on saves against being frightened.' }, { name: 'Halfling nimbleness', description: 'You can move through the space of a creature larger than you.' }],
+    'gnome':      [{ name: 'Darkvision', description: '60 feet.' }, { name: 'Gnome cunning', description: 'Advantage on Intelligence, Wisdom, and Charisma saves against magic.' }],
+    'half-orc':   [{ name: 'Darkvision', description: '60 feet.' }, { name: 'Relentless endurance', description: 'Once per long rest when reduced to 0 HP, drop to 1 HP instead.' }, { name: 'Savage attacks', description: 'On a crit with a melee weapon, roll one of the damage dice an additional time.' }],
+    'tiefling':   [{ name: 'Darkvision', description: '60 feet.' }, { name: 'Hellish resistance', description: 'Resistance to fire damage.' }, { name: 'Infernal legacy', description: 'Know Thaumaturgy cantrip. At 3rd level: Hellish Rebuke. At 5th level: Darkness.' }],
+    'dragonborn': [{ name: 'Breath weapon', description: 'Exhale destructive energy. DC 8 + Con mod + proficiency. Recharges on short or long rest.' }, { name: 'Damage resistance', description: 'Resistance to the damage type of your draconic ancestry.' }],
+    'half-elf':   [{ name: 'Darkvision', description: '60 feet.' }, { name: 'Fey ancestry', description: 'Advantage on saves against charmed. Cannot be magically put to sleep.' }, { name: 'Skill versatility', description: 'Proficiency in two skills of your choice.' }],
+  };
+  return map[speciesId] || [];
 }
 
 // ── INVENTORY TAB ────────────────────────────────────────────────────────────
@@ -1193,6 +1267,25 @@ function showLevelUpModal() {
   const newFeatures = newProg.features.filter(f => f !== 'archetype-feature' && f !== 'asi');
   const isASI = newProg.features.includes('asi');
   const isArchetype = newProg.features.includes('archetype-feature');
+  const availableFeats = homebrew.filter(h => h.type === 'feat');
+
+  // For archetypes unlocked at this level
+  let archetypeChoice = '';
+  if (newLevel === 3 && !data.archetypeId) {
+    const archetypes = Object.values(OUTLAW.archetypes);
+    archetypeChoice = `
+      <div style="padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius); margin-bottom:0.75rem;">
+        <strong style="color:var(--gold)">Choose your archetype</strong>
+        <div style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.4rem;">
+          ${archetypes.map(a => `
+            <label style="display:flex; gap:0.5rem; align-items:center; cursor:pointer;">
+              <input type="radio" name="lvlup-archetype" value="${a.id}" />
+              <span style="font-size:0.9rem;">${a.name}</span>
+            </label>
+          `).join('')}
+        </div>
+      </div>`;
+  }
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -1203,6 +1296,7 @@ function showLevelUpModal() {
         <div><strong style="color:var(--gold)">Proficiency bonus:</strong> +${newProg.profBonus}</div>
         <div><strong style="color:var(--gold)">Nerve Dice:</strong> ${newProg.nerveDiceCount} × d${newProg.nerveDieSize}</div>
       </div>
+
       ${newFeatures.map(fid => {
         const f = OUTLAW.features[fid] || (data.archetypeId && OUTLAW.archetypes[data.archetypeId]?.features[fid]);
         return f ? `<div style="margin-bottom:0.75rem; padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius);">
@@ -1210,10 +1304,55 @@ function showLevelUpModal() {
           <div style="font-size:0.85rem; color:var(--text-dim);">${f.description}</div>
         </div>` : '';
       }).join('')}
-      ${isASI ? `<div style="padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius); margin-bottom:0.75rem;"><strong style="color:var(--gold)">Ability Score Improvement</strong><br/><span style="font-size:0.85rem; color:var(--text-dim);">Apply your ASI in the Admin tab, or take a feat via the DM.</span></div>` : ''}
-      ${isArchetype ? `<div style="padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius); margin-bottom:0.75rem;"><strong style="color:var(--gold)">Archetype feature</strong><br/><span style="font-size:0.85rem; color:var(--text-dim);">You gain a new ${data.archetypeName} feature. See Features tab.</span></div>` : ''}
+
+      ${archetypeChoice}
+
+      ${isArchetype && data.archetypeId ? `<div style="padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius); margin-bottom:0.75rem;">
+        <strong style="color:var(--gold)">New archetype feature: ${data.archetypeName}</strong>
+        <div style="font-size:0.85rem; color:var(--text-dim); margin-top:0.25rem;">See the Features tab for your new ability.</div>
+      </div>` : ''}
+
+      ${isASI ? `
+        <div style="padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius); margin-bottom:0.75rem;">
+          <strong style="color:var(--gold)">Ability Score Improvement or Feat</strong>
+          <div style="font-size:0.85rem; color:var(--text-dim); margin:0.5rem 0;">Choose a feat to take, or choose to increase an ability score by 2 (or two scores by 1 each).</div>
+          <div style="margin-bottom:0.5rem;">
+            <label style="display:flex; gap:0.5rem; align-items:center; cursor:pointer; margin-bottom:0.35rem;">
+              <input type="radio" name="asi-choice" value="feat" id="asi-feat-radio" />
+              <span style="font-size:0.9rem;">Take a feat</span>
+            </label>
+            <label style="display:flex; gap:0.5rem; align-items:center; cursor:pointer;">
+              <input type="radio" name="asi-choice" value="asi" id="asi-asi-radio" checked />
+              <span style="font-size:0.9rem;">Ability score improvement</span>
+            </label>
+          </div>
+          <div id="asi-feat-section" style="display:none; margin-top:0.5rem;">
+            <select class="form-select" id="asi-feat-picker">
+              <option value="">— Select feat —</option>
+              ${availableFeats.map(f => `<option value="${f.id}">${f.name}</option>`).join('')}
+            </select>
+            ${availableFeats.length === 0 ? '<div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.25rem;">No feats defined yet. The DM can add them in the Homebrew Editor.</div>' : ''}
+          </div>
+          <div id="asi-score-section" style="margin-top:0.5rem;">
+            <div style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.5rem;">Current scores. Add +2 to one or +1 to two (max 20).</div>
+            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:0.4rem;">
+              ${Object.entries(data.abilities).map(([ab, val]) => `
+                <div style="background:var(--bg-raised); border:1px solid var(--border); border-radius:var(--radius); padding:6px; text-align:center;">
+                  <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.08em;">${ab.substring(0,3)}</div>
+                  <div style="font-size:18px; font-weight:500;">${val}</div>
+                  <div style="display:flex; gap:4px; justify-content:center; margin-top:4px;">
+                    <button class="btn btn-sm asi-inc" data-ab="${ab}" data-val="${val}" style="padding:2px 8px;">+1</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            <div id="asi-pending" style="font-size:0.85rem; color:var(--gold); margin-top:0.5rem;"></div>
+          </div>
+        </div>
+      ` : ''}
+
       <div class="form-group" style="margin-top:0.75rem;">
-        <label>Roll or enter new HP gained (d10 + Con mod ${formatMod(derived.mods.constitution)})</label>
+        <label>HP gained (d10 + Con mod ${formatMod(derived.mods.constitution)})</label>
         <div style="display:flex; gap:0.5rem;">
           <input class="form-input" type="number" id="lvlup-hp" placeholder="${Math.ceil(10/2)+1+derived.mods.constitution}" />
           <button class="btn btn-sm" id="roll-hp">Roll</button>
@@ -1228,24 +1367,190 @@ function showLevelUpModal() {
 
   document.body.appendChild(overlay);
 
+  // ASI choice toggle
+  let asiPending = {}; // { ability: delta }
+  const TOTAL_POINTS = 2;
+
+  function updateASIPending() {
+    const total = Object.values(asiPending).reduce((s, v) => s + v, 0);
+    const remaining = TOTAL_POINTS - total;
+    const el = document.getElementById('asi-pending');
+    if (el) el.textContent = remaining > 0 ? `Points remaining: ${remaining}` : 'Points assigned ✓';
+  }
+
+  overlay.querySelectorAll('input[name="asi-choice"]').forEach(r => {
+    r.addEventListener('change', () => {
+      const isFeat = document.getElementById('asi-feat-radio')?.checked;
+      const featSection = document.getElementById('asi-feat-section');
+      const scoreSection = document.getElementById('asi-score-section');
+      if (featSection) featSection.style.display = isFeat ? 'block' : 'none';
+      if (scoreSection) scoreSection.style.display = isFeat ? 'none' : 'block';
+      asiPending = {};
+    });
+  });
+
+  overlay.querySelectorAll('.asi-inc').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ab = btn.dataset.ab;
+      const currentVal = data.abilities[ab] + (asiPending[ab] || 0);
+      const total = Object.values(asiPending).reduce((s, v) => s + v, 0);
+      if (currentVal >= 20) { showMsg('Cannot exceed 20 with an ASI.'); return; }
+      if (total >= TOTAL_POINTS) { showMsg('Already assigned all points. Click a +1 on a different stat to reassign.'); return; }
+      asiPending[ab] = (asiPending[ab] || 0) + 1;
+      btn.closest('div[style*="text-align:center"]').querySelector('div[style*="font-size:18px"]').textContent = currentVal + 1;
+      updateASIPending();
+    });
+  });
+
   document.getElementById('roll-hp')?.addEventListener('click', () => {
     const roll = rollDie(10) + derived.mods.constitution;
     document.getElementById('lvlup-hp').value = Math.max(1, roll);
   });
 
   document.getElementById('lvlup-cancel')?.addEventListener('click', () => overlay.remove());
+
   document.getElementById('lvlup-confirm')?.addEventListener('click', async () => {
+    // Validate archetype choice if needed
+    if (newLevel === 3 && !data.archetypeId) {
+      const chosen = overlay.querySelector('input[name="lvlup-archetype"]:checked')?.value;
+      if (!chosen) { alert('Please choose an archetype.'); return; }
+    }
+
     const hpGained = Math.max(1, parseInt(document.getElementById('lvlup-hp')?.value) || (Math.ceil(10/2)+1+derived.mods.constitution));
+    const isFeatChoice = document.getElementById('asi-feat-radio')?.checked;
+    const chosenFeatId = document.getElementById('asi-feat-picker')?.value;
+    const chosenArchetype = overlay.querySelector('input[name="lvlup-archetype"]:checked')?.value;
+
+    // If the chosen feat has player-choice-stat effects, show a picker first
+    if (isASI && isFeatChoice && chosenFeatId) {
+      const feat = homebrew.find(h => h.id === chosenFeatId);
+      const choiceEffects = feat?.data?.effects?.filter(e => e.type === 'player-choice-stat') || [];
+      if (choiceEffects.length > 0) {
+        const amount = parseInt(choiceEffects[0].amount || 1);
+        const numChoices = amount === 1 ? 2 : 1; // +2 to one stat, or +1 to two stats
+        const picked = await showStatPickerModal(feat.name, numChoices, amount === 1 ? 1 : 2);
+        if (!picked) return; // player cancelled
+
+        mutate(() => {
+          char.level = newLevel;
+          data.currentHP = (data.currentHP ?? 0) + hpGained;
+          data.maxHPOverride = null;
+          data.nerveDiceCurrent = newProg.nerveDiceCount;
+          if (chosenArchetype) { data.archetypeId = chosenArchetype; data.archetypeName = OUTLAW.archetypes[chosenArchetype]?.name || ''; }
+          data.feats = data.feats || [];
+          if (!data.feats.find(f => f.id === chosenFeatId)) {
+            data.feats.push({ id: chosenFeatId, name: feat.name, description: feat.data?.description || '', effects: feat.data?.effects || [] });
+          }
+          applyFeatEffects(feat.data?.effects || [], picked);
+        });
+        await saveCharacter({ ...char, data }, userId);
+        overlay.remove();
+        showMsg(`Leveled up to ${newLevel}! +${hpGained} HP.`);
+        return;
+      }
+    }
+
     mutate(() => {
       char.level = newLevel;
       data.currentHP = (data.currentHP ?? 0) + hpGained;
-      data.maxHPOverride = null; // recalculate from new level
-      data.nerveDiceCurrent = newProg.nerveDiceCount; // restore to new max
+      data.maxHPOverride = null;
+      data.nerveDiceCurrent = newProg.nerveDiceCount;
+
+      if (chosenArchetype) {
+        data.archetypeId = chosenArchetype;
+        data.archetypeName = OUTLAW.archetypes[chosenArchetype]?.name || '';
+      }
+
+      if (isASI) {
+        if (isFeatChoice && chosenFeatId) {
+          const feat = homebrew.find(h => h.id === chosenFeatId);
+          if (feat) {
+            data.feats = data.feats || [];
+            if (!data.feats.find(f => f.id === chosenFeatId)) {
+              data.feats.push({ id: chosenFeatId, name: feat.name, description: feat.data?.description || '', effects: feat.data?.effects || [] });
+            }
+            applyFeatEffects(feat.data?.effects || [], []);
+          }
+        } else {
+          Object.entries(asiPending).forEach(([ab, delta]) => {
+            data.abilities[ab] = Math.min(20, (data.abilities[ab] || 10) + delta);
+          });
+        }
+      }
     });
+
     await saveCharacter({ ...char, data }, userId);
     overlay.remove();
     showMsg(`Leveled up to ${newLevel}! +${hpGained} HP.`);
   });
+}
+
+function showStatPickerModal(featName, numChoices, pointsPerChoice) {
+  return new Promise(resolve => {
+    const ABILITIES_LIST = ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
+    let picked = [];
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal">
+        <div class="modal-title">${featName} — Choose ability score${numChoices > 1 ? 's' : ''}</div>
+        <p style="font-size:0.88rem; color:var(--text-dim); margin-bottom:1rem;">
+          Choose ${numChoices} ability score${numChoices > 1 ? 's' : ''} to increase by +${pointsPerChoice} each (max 20).
+        </p>
+        <div style="display:flex; flex-direction:column; gap:0.4rem;">
+          ${ABILITIES_LIST.map(ab => `
+            <label style="display:flex; gap:0.75rem; align-items:center; padding:0.5rem; border-radius:var(--radius); cursor:pointer; border:1px solid var(--border);">
+              <input type="checkbox" name="stat-pick" value="${ab}" ${(data.abilities[ab]||10) >= 20 ? 'disabled' : ''} />
+              <span style="flex:1;">${ab.charAt(0).toUpperCase()+ab.slice(1)}</span>
+              <span style="color:var(--text-muted);">${data.abilities[ab]||10} → ${Math.min(20,(data.abilities[ab]||10)+pointsPerChoice)}</span>
+            </label>
+          `).join('')}
+        </div>
+        <div id="pick-count" style="font-size:0.85rem; color:var(--gold); margin-top:0.75rem;">Selected: 0 / ${numChoices}</div>
+        <div class="modal-footer">
+          <button class="btn" id="pick-cancel">Cancel</button>
+          <button class="btn btn-gold" id="pick-confirm" disabled>Confirm</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelectorAll('input[name="stat-pick"]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (cb.checked) picked.push(cb.value);
+        else picked = picked.filter(v => v !== cb.value);
+        if (picked.length > numChoices) { cb.checked = false; picked = picked.filter(v => v !== cb.value); }
+        modal.querySelector('#pick-count').textContent = `Selected: ${picked.length} / ${numChoices}`;
+        modal.querySelector('#pick-confirm').disabled = picked.length !== numChoices;
+      });
+    });
+
+    modal.querySelector('#pick-cancel').addEventListener('click', () => { modal.remove(); resolve(null); });
+    modal.querySelector('#pick-confirm').addEventListener('click', () => { modal.remove(); resolve(picked); });
+  });
+}
+
+function applyFeatEffects(effects, chosenStats) {
+  for (const e of effects) {
+    if (e.type === 'stat-bonus' && e.ability && e.amount) {
+      data.abilities[e.ability] = Math.min(20, (data.abilities[e.ability] || 10) + parseInt(e.amount));
+    }
+    if (e.type === 'player-choice-stat' && chosenStats?.length) {
+      // chosenStats is array of ability names the player chose
+      chosenStats.forEach(ab => {
+        data.abilities[ab] = Math.min(20, (data.abilities[ab] || 10) + parseInt(e.amount || 1));
+      });
+    }
+    if (e.type === 'skill-proficiency' && e.skill) {
+      const camel = toCamelCase(e.skill.toLowerCase().replace(/\s+/g, ''));
+      data.skillProficiencies = data.skillProficiencies || [];
+      if (!data.skillProficiencies.includes(camel)) data.skillProficiencies.push(camel);
+    }
+  }
+}
+
+function toCamelCase(s) {
+  return s.replace(/\s+(.)/g, (_, c) => c.toUpperCase()).replace(/^./, c => c.toLowerCase());
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
