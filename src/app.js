@@ -42,7 +42,7 @@ async function render() {
         ${appState.userIsDM ? `<button class="btn btn-sm" id="nav-hb">Homebrew Editor</button>` : ''}
         ${appState.userIsDM && onSheet ? `
           <button class="btn btn-sm ${appState.playerViewActive ? 'btn-gold' : ''}" id="nav-playerview" title="Toggle player view">
-            ${appState.playerViewActive ? '🎭 Player view ON' : '🎭 Player view'}
+            ${appState.playerViewActive ? 'Player view ON' : 'Player view'}
           </button>` : ''}
         <button class="btn btn-sm" id="nav-chars">My Characters</button>
         <span class="nav-user">${appState.session.user.email}</span>
