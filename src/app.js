@@ -10,6 +10,7 @@ import { renderHomebrewEditor } from './pages/homebrewEditor.js';
 export const appState = {
   session: null,
   userIsDM: false,
+  playerViewActive: false,   // DM can toggle to see sheet as a player would
   currentPage: 'loading',
   currentCharacterId: null,
 };
@@ -32,12 +33,17 @@ async function render() {
   }
 
   // Build nav
+  const onSheet = appState.currentPage === 'sheet';
   const navHtml = `
     <nav class="topnav">
       <div class="nav-brand">⚔ Homebrew Sheet</div>
       <div class="nav-right">
         ${appState.userIsDM ? `<button class="btn btn-sm" id="nav-dm">DM View</button>` : ''}
         ${appState.userIsDM ? `<button class="btn btn-sm" id="nav-hb">Homebrew Editor</button>` : ''}
+        ${appState.userIsDM && onSheet ? `
+          <button class="btn btn-sm ${appState.playerViewActive ? 'btn-gold' : ''}" id="nav-playerview" title="Toggle player view">
+            ${appState.playerViewActive ? '🎭 Player view ON' : '🎭 Player view'}
+          </button>` : ''}
         <button class="btn btn-sm" id="nav-chars">My Characters</button>
         <span class="nav-user">${appState.session.user.email}</span>
         <button class="btn btn-sm btn-danger" id="nav-signout">Sign out</button>
@@ -49,15 +55,29 @@ async function render() {
   const content = document.getElementById('page-content');
 
   // Wire nav buttons
-  document.getElementById('nav-chars')?.addEventListener('click', () => navigate('characters'));
+  document.getElementById('nav-chars')?.addEventListener('click', () => {
+    appState.playerViewActive = false;
+    navigate('characters');
+  });
   document.getElementById('nav-signout')?.addEventListener('click', async () => {
     await signOut();
     appState.session = null;
     appState.userIsDM = false;
+    appState.playerViewActive = false;
     navigate('login');
   });
-  document.getElementById('nav-dm')?.addEventListener('click', () => navigate('dm'));
-  document.getElementById('nav-hb')?.addEventListener('click', () => navigate('homebrew-editor'));
+  document.getElementById('nav-dm')?.addEventListener('click', () => {
+    appState.playerViewActive = false;
+    navigate('dm');
+  });
+  document.getElementById('nav-hb')?.addEventListener('click', () => {
+    appState.playerViewActive = false;
+    navigate('homebrew-editor');
+  });
+  document.getElementById('nav-playerview')?.addEventListener('click', () => {
+    appState.playerViewActive = !appState.playerViewActive;
+    render();
+  });
 
   // Render page
   switch (appState.currentPage) {
@@ -65,7 +85,7 @@ async function render() {
       await renderCharacterList(content, appState.session.user.id, navigate);
       break;
     case 'sheet':
-      await renderSheet(content, appState.currentCharacterId, appState.session.user.id, appState.userIsDM, navigate);
+      await renderSheet(content, appState.currentCharacterId, appState.session.user.id, appState.userIsDM && !appState.playerViewActive, navigate);
       break;
     case 'new-character':
       await renderCharacterCreation(content, appState.session.user.id, navigate);
