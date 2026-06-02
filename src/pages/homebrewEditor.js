@@ -3,17 +3,18 @@ import { getAllHomebrew, saveHomebrew, deleteHomebrew } from '../lib/db.js';
 const TYPES = ['feat','species','background','item'];
 
 const EFFECT_TYPES = [
-  { value:'stat-bonus',       label:'Ability score bonus' },
-  { value:'skill-proficiency',label:'Skill proficiency' },
-  { value:'skill-expertise',  label:'Skill expertise' },
-  { value:'save-proficiency', label:'Saving throw proficiency' },
-  { value:'ac-bonus',         label:'AC bonus' },
-  { value:'initiative-bonus', label:'Initiative bonus' },
-  { value:'speed-bonus',      label:'Speed bonus' },
-  { value:'damage-resistance',label:'Damage resistance' },
+  { value:'stat-bonus',        label:'Ability score bonus (+X to specific stat)' },
+  { value:'player-choice-stat',label:'Player choice: pick a stat to increase' },
+  { value:'skill-proficiency', label:'Skill proficiency' },
+  { value:'skill-expertise',   label:'Skill expertise' },
+  { value:'save-proficiency',  label:'Saving throw proficiency' },
+  { value:'ac-bonus',          label:'AC bonus' },
+  { value:'initiative-bonus',  label:'Initiative bonus' },
+  { value:'speed-bonus',       label:'Speed bonus' },
+  { value:'damage-resistance', label:'Damage resistance' },
   { value:'condition-immunity',label:'Condition immunity' },
-  { value:'limited-use',      label:'Limited use ability' },
-  { value:'passive',          label:'Passive / flavour text' },
+  { value:'limited-use',       label:'Limited use ability' },
+  { value:'passive',           label:'Passive / flavour text' },
 ];
 
 const ABILITIES = ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
@@ -43,6 +44,11 @@ export async function renderHomebrewEditor(container) {
         ${ABILITIES.map(a => `<option value="${a}" ${effect.ability===a?'selected':''}>${a}</option>`).join('')}
       </select>
       <input class="form-input eff-detail" data-idx="${idx}" data-key="amount" type="number" value="${effect.amount||1}" style="width:70px;" placeholder="Amount" />`;
+    } else if (effect.type === 'player-choice-stat') {
+      detail = `
+        <input class="form-input eff-detail" data-idx="${idx}" data-key="amount" type="number" value="${effect.amount||1}" style="width:70px;" placeholder="+amount" />
+        <span style="font-size:0.82rem; color:var(--text-dim); margin-left:4px;">Player picks which ability when taking this feat</span>
+      `;
     } else if (effect.type === 'skill-proficiency' || effect.type === 'skill-expertise') {
       detail = `<select class="form-select eff-detail" data-idx="${idx}" data-key="skill">
         ${SKILLS.map(s => `<option value="${s}" ${effect.skill===s?'selected':''}>${s}</option>`).join('')}
