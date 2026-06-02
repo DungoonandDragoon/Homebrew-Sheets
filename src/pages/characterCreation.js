@@ -6,6 +6,28 @@ const CLASSES = [
   { id: 'outlaw', name: 'Outlaw', hitDie: 10, description: 'A ranged martial who wins fights through speed, nerve, and precision.' },
 ];
 
+// 2014 PHB fixed ability score bonuses per species.
+// Species with player-choice elements are handled separately in createCharacter().
+const BUILTIN_SPECIES_BONUSES = {
+  'human':      { strength:1, dexterity:1, constitution:1, intelligence:1, wisdom:1, charisma:1 },
+  'elf':        { dexterity:2 },
+  'dwarf':      { constitution:2 },
+  'halfling':   { dexterity:2 },
+  'gnome':      { intelligence:2 },
+  'half-orc':   { strength:2, constitution:1 },
+  'tiefling':   { charisma:2, intelligence:1 },
+  'dragonborn': { strength:2, charisma:1 },
+  // half-elf: +2 Cha fixed + two player-choice +1s — handled via modal in createCharacter()
+};
+
+// Species that need a player to pick some or all of their ASI targets
+const SPECIES_WITH_CHOICES = {
+  'half-elf': {
+    fixed: { charisma: 2 },
+    choices: { count: 2, amount: 1, exclude: ['charisma'], label: 'Half-elf: choose two other ability scores to increase by +1 each' },
+  },
+};
+
 export async function renderCharacterCreation(container, userId, navigate) {
   let homebrew = [];
   try { homebrew = await getAllHomebrew(); } catch (_) {}
@@ -14,30 +36,30 @@ export async function renderCharacterCreation(container, userId, navigate) {
   const homebrewBackgrounds = homebrew.filter(h => h.type === 'background');
 
   const BUILTIN_SPECIES = [
-    { id:'human', name:'Human', description:'Versatile and ambitious.' },
-    { id:'elf', name:'Elf', description:'Graceful and perceptive.' },
-    { id:'dwarf', name:'Dwarf', description:'Hardy and resilient.' },
-    { id:'halfling', name:'Halfling', description:'Lucky and nimble.' },
-    { id:'gnome', name:'Gnome', description:'Clever and inventive.' },
-    { id:'half-orc', name:'Half-orc', description:'Strong and enduring.' },
-    { id:'tiefling', name:'Tiefling', description:'Infernal heritage.' },
+    { id:'human',      name:'Human',      description:'Versatile and ambitious.' },
+    { id:'elf',        name:'Elf',        description:'Graceful and perceptive.' },
+    { id:'dwarf',      name:'Dwarf',      description:'Hardy and resilient.' },
+    { id:'halfling',   name:'Halfling',   description:'Lucky and nimble.' },
+    { id:'gnome',      name:'Gnome',      description:'Clever and inventive.' },
+    { id:'half-orc',   name:'Half-orc',   description:'Strong and enduring.' },
+    { id:'tiefling',   name:'Tiefling',   description:'Infernal heritage.' },
     { id:'dragonborn', name:'Dragonborn', description:'Draconic power.' },
-    { id:'half-elf', name:'Half-elf', description:'Adaptable and charming.' },
+    { id:'half-elf',   name:'Half-elf',   description:'+2 Cha, +1 to two other scores of your choice.' },
   ];
   const BUILTIN_BACKGROUNDS = [
-    { id:'outlander', name:'Outlander' },
-    { id:'criminal', name:'Criminal' },
-    { id:'soldier', name:'Soldier' },
-    { id:'acolyte', name:'Acolyte' },
-    { id:'folk-hero', name:'Folk hero' },
-    { id:'noble', name:'Noble' },
-    { id:'sage', name:'Sage' },
-    { id:'charlatan', name:'Charlatan' },
-    { id:'entertainer', name:'Entertainer' },
+    { id:'outlander',     name:'Outlander' },
+    { id:'criminal',      name:'Criminal' },
+    { id:'soldier',       name:'Soldier' },
+    { id:'acolyte',       name:'Acolyte' },
+    { id:'folk-hero',     name:'Folk hero' },
+    { id:'noble',         name:'Noble' },
+    { id:'sage',          name:'Sage' },
+    { id:'charlatan',     name:'Charlatan' },
+    { id:'entertainer',   name:'Entertainer' },
     { id:'guild-artisan', name:'Guild artisan' },
-    { id:'hermit', name:'Hermit' },
-    { id:'sailor', name:'Sailor' },
-    { id:'urchin', name:'Urchin' },
+    { id:'hermit',        name:'Hermit' },
+    { id:'sailor',        name:'Sailor' },
+    { id:'urchin',        name:'Urchin' },
   ];
 
   const allSpecies = [
@@ -120,8 +142,6 @@ export async function renderCharacterCreation(container, userId, navigate) {
     }
 
     if (step === 2) {
-      // Point buy: 27 points, costs per score:
-      // 8=0, 9=1, 10=2, 11=3, 12=4, 13=5, 14=7, 15=9
       const COSTS = {8:0,9:1,10:2,11:3,12:4,13:5,14:7,15:9};
       const TOTAL_POINTS = 27;
       function pointsSpent(abs) {
@@ -130,25 +150,36 @@ export async function renderCharacterCreation(container, userId, navigate) {
       const spent = pointsSpent(draft.abilities);
       const remaining = TOTAL_POINTS - spent;
 
+      const speciesFixed = BUILTIN_SPECIES_BONUSES[draft.speciesId] || {};
+      const speciesChoice = SPECIES_WITH_CHOICES[draft.speciesId];
+      // For display: show fixed bonuses; choice bonuses shown as "?" note
+      const choiceNote = speciesChoice
+        ? `<div style="margin-top:0.6rem; padding:0.5rem 0.75rem; background:var(--bg-raised); border-radius:var(--radius); font-size:0.85rem; color:var(--gold);">
+            ${speciesChoice.choices.label} — you'll pick these when you click Create.
+           </div>`
+        : '';
+
       html += `
         <div class="card">
           <div class="card-title">Ability scores — point buy</div>
-          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
-            <p style="font-size:0.9rem; color:var(--text-dim);">Distribute 27 points. Scores range from 8 to 15 before species bonuses.</p>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.75rem;">
+            <p style="font-size:0.9rem; color:var(--text-dim); margin:0;">Distribute 27 points. Scores range from 8–15 here. Species bonuses (2014 rules) are applied automatically on creation.</p>
             <div style="font-family:var(--font-display); font-size:1rem; color:${remaining === 0 ? 'var(--green)' : 'var(--gold)'}; white-space:nowrap; margin-left:1rem;">
               ${remaining} pts left
             </div>
           </div>
-          <div class="form-row cols-3">
+          ${choiceNote}
+          <div class="form-row cols-3" style="margin-top:0.75rem;">
             ${['strength','dexterity','constitution','intelligence','wisdom','charisma'].map(ab => {
               const val = draft.abilities[ab];
+              const bonus = speciesFixed[ab] || 0;
               const canInc = val < 15 && (remaining - ((COSTS[val+1]??99) - (COSTS[val]??0))) >= 0;
               const canDec = val > 8;
               return `
                 <div style="background:var(--bg-raised); border:1px solid var(--border); border-radius:var(--radius); padding:10px 8px; text-align:center;">
                   <div class="stat-label">${ab.substring(0,3).toUpperCase()}</div>
-                  <div style="font-size:1.6rem; font-weight:500; margin:6px 0;">${val}</div>
-                  <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">(${val >= 8 && val <= 15 ? COSTS[val] : '?'} pts)</div>
+                  <div style="font-size:1.6rem; font-weight:500; margin:6px 0;">${val}${bonus > 0 ? `<span style="font-size:1rem; color:var(--gold);"> +${bonus}</span>` : ''}</div>
+                  <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">${bonus > 0 ? `= ${val+bonus} final · ` : ''}(${val >= 8 && val <= 15 ? COSTS[val] : '?'} pts)</div>
                   <div style="display:flex; gap:4px; justify-content:center;">
                     <button class="btn btn-sm pb-dec" data-ab="${ab}" ${canDec?'':'disabled'} style="padding:2px 10px;">−</button>
                     <button class="btn btn-sm pb-inc" data-ab="${ab}" ${canInc?'':'disabled'} style="padding:2px 10px;">+</button>
@@ -188,7 +219,6 @@ export async function renderCharacterCreation(container, userId, navigate) {
         </div>
       `;
 
-      // Gunslinger trick shots
       if (draft.archetypeId === 'gunslinger' && draft.level >= 3) {
         const shots = OUTLAW.archetypes.gunslinger.trickShots.options;
         const needed = 3 + OUTLAW.archetypes.gunslinger.trickShots.additionalLevels.filter(l => l <= draft.level).length;
@@ -218,7 +248,6 @@ export async function renderCharacterCreation(container, userId, navigate) {
           <div class="card-title">Skill proficiencies (choose ${count})</div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.25rem;">
             ${skills.map(s => {
-              const key = s.replace(/\s+/g,'').replace(/^./, c=>c.toLowerCase());
               const camel = toCamel(s);
               return `
                 <label style="display:flex; gap:0.5rem; align-items:center; padding:0.4rem; border-radius:var(--radius); cursor:pointer; background:${draft.skillProficiencies.includes(camel)?'var(--gold-glow)':'transparent'};">
@@ -361,7 +390,6 @@ export async function renderCharacterCreation(container, userId, navigate) {
 
   function validateStep() {
     if (step === 1 && !draft.name.trim()) { alert('Please enter a character name.'); return false; }
-    // Archetype only required at level 3+
     if (step === 3 && draft.level >= 3 && !draft.archetypeId) {
       alert('Please choose an archetype. If starting below level 3, set your level on step 1 first.');
       return false;
@@ -376,10 +404,59 @@ export async function renderCharacterCreation(container, userId, navigate) {
 
   async function createCharacter() {
     try {
-      const hp = draft.maxHPOverride || maxHP({ level: draft.level, abilities: draft.abilities, classId: draft.classId });
+      const finalAbilities = { ...draft.abilities };
+
+      // Apply fixed species ASI bonuses (2014 PHB)
+      const builtinBonuses = BUILTIN_SPECIES_BONUSES[draft.speciesId];
+      if (builtinBonuses) {
+        for (const [ab, bonus] of Object.entries(builtinBonuses)) {
+          finalAbilities[ab] = Math.min(20, (finalAbilities[ab] || 10) + bonus);
+        }
+      }
+
+      // Apply fixed portion of choice-based species, then prompt for the rest
+      const speciesChoice = SPECIES_WITH_CHOICES[draft.speciesId];
+      if (speciesChoice) {
+        // Apply fixed bonuses first (e.g. half-elf's guaranteed +2 Cha)
+        if (speciesChoice.fixed) {
+          for (const [ab, bonus] of Object.entries(speciesChoice.fixed)) {
+            finalAbilities[ab] = Math.min(20, (finalAbilities[ab] || 10) + bonus);
+          }
+        }
+        // Prompt for player choices
+        const { count, amount, exclude, label } = speciesChoice.choices;
+        const chosen = await showSpeciesStatPickerModal(label, finalAbilities, count, amount, exclude);
+        if (!chosen) return; // player cancelled
+        for (const ab of chosen) {
+          finalAbilities[ab] = Math.min(20, (finalAbilities[ab] || 10) + amount);
+        }
+      }
+
+      // Apply homebrew species bonuses — fixed stat-bonus effects auto-applied,
+      // player-choice-stat effects prompted
+      const hbSpecies = homebrew.find(h => h.type === 'species' && (`hb_${h.id}` === draft.speciesId || h.id === draft.speciesId));
+      if (hbSpecies?.data?.effects) {
+        for (const e of hbSpecies.data.effects) {
+          if (e.type === 'stat-bonus' && e.ability && e.amount) {
+            finalAbilities[e.ability] = Math.min(20, (finalAbilities[e.ability] || 10) + parseInt(e.amount));
+          }
+          if (e.type === 'player-choice-stat' && e.amount) {
+            const amount = parseInt(e.amount || 1);
+            const numChoices = amount === 1 ? 2 : 1;
+            const label = `${hbSpecies.name}: choose ${numChoices} ability score${numChoices > 1 ? 's' : ''} to increase by +${amount}`;
+            const chosen = await showSpeciesStatPickerModal(label, finalAbilities, numChoices, amount, []);
+            if (!chosen) return;
+            for (const ab of chosen) {
+              finalAbilities[ab] = Math.min(20, (finalAbilities[ab] || 10) + amount);
+            }
+          }
+        }
+      }
+
+      const hp = draft.maxHPOverride || maxHP({ level: draft.level, abilities: finalAbilities, classId: draft.classId });
       const archObj = draft.archetypeId ? OUTLAW.archetypes[draft.archetypeId] : null;
-      // Nerve dice only available from level 2+
       const ndMax = draft.level >= 2 ? (OUTLAW.progression.find(p => p.level === draft.level)?.nerveDiceCount || 0) : 0;
+
       const characterData = {
         name: draft.name,
         class_id: draft.classId,
@@ -389,7 +466,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
           archetypeName: archObj?.name || '',
           speciesId: draft.speciesId,
           backgroundId: draft.backgroundId,
-          abilities: draft.abilities,
+          abilities: finalAbilities,
           skillProficiencies: draft.skillProficiencies,
           saveProficiencies: draft.saveProficiencies,
           currentHP: draft.currentHP ?? hp,
@@ -425,6 +502,64 @@ export async function renderCharacterCreation(container, userId, navigate) {
 
   renderStep();
 }
+
+// ── Species stat picker modal ─────────────────────────────────────────────────
+// Shows a modal asking the player to pick `numChoices` ability scores to
+// increase by `amount`, excluding any in `exclude`. Returns a Promise that
+// resolves to an array of chosen ability names, or null if cancelled.
+function showSpeciesStatPickerModal(label, currentAbilities, numChoices, amount, exclude) {
+  return new Promise(resolve => {
+    const ALL_ABILITIES = ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
+    const available = ALL_ABILITIES.filter(ab => !exclude.includes(ab) && (currentAbilities[ab] || 10) < 20);
+    let picked = [];
+
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal">
+        <div class="modal-title">Species ability score increase</div>
+        <p style="font-size:0.88rem; color:var(--text-dim); margin-bottom:1rem;">${label}</p>
+        <div style="display:flex; flex-direction:column; gap:0.4rem;">
+          ${available.map(ab => {
+            const cur = currentAbilities[ab] || 10;
+            return `
+              <label style="display:flex; gap:0.75rem; align-items:center; padding:0.5rem; border-radius:var(--radius); cursor:pointer; border:1px solid var(--border);">
+                <input type="checkbox" name="species-pick" value="${ab}" />
+                <span style="flex:1; text-transform:capitalize;">${ab}</span>
+                <span style="color:var(--text-muted); font-size:0.9rem;">${cur} → ${Math.min(20, cur + amount)}</span>
+              </label>
+            `;
+          }).join('')}
+        </div>
+        <div id="species-pick-count" style="font-size:0.85rem; color:var(--gold); margin-top:0.75rem;">Selected: 0 / ${numChoices}</div>
+        <div class="modal-footer">
+          <button class="btn" id="species-pick-cancel">Cancel</button>
+          <button class="btn btn-gold" id="species-pick-confirm" disabled>Confirm</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelectorAll('input[name="species-pick"]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (cb.checked) picked.push(cb.value);
+        else picked = picked.filter(v => v !== cb.value);
+        // Don't allow picking more than numChoices
+        if (picked.length > numChoices) {
+          cb.checked = false;
+          picked = picked.filter(v => v !== cb.value);
+        }
+        modal.querySelector('#species-pick-count').textContent = `Selected: ${picked.length} / ${numChoices}`;
+        modal.querySelector('#species-pick-confirm').disabled = picked.length !== numChoices;
+      });
+    });
+
+    modal.querySelector('#species-pick-cancel').addEventListener('click', () => { modal.remove(); resolve(null); });
+    modal.querySelector('#species-pick-confirm').addEventListener('click', () => { modal.remove(); resolve(picked); });
+  });
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function getArchetypeBlurb(id) {
   const blurbs = {
