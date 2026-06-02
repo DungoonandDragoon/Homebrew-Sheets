@@ -120,17 +120,45 @@ export async function renderCharacterCreation(container, userId, navigate) {
     }
 
     if (step === 2) {
+      // Point buy: 27 points, costs per score:
+      // 8=0, 9=1, 10=2, 11=3, 12=4, 13=5, 14=7, 15=9
+      const COSTS = {8:0,9:1,10:2,11:3,12:4,13:5,14:7,15:9};
+      const TOTAL_POINTS = 27;
+      function pointsSpent(abs) {
+        return Object.values(abs).reduce((sum, v) => sum + (COSTS[v] ?? 0), 0);
+      }
+      const spent = pointsSpent(draft.abilities);
+      const remaining = TOTAL_POINTS - spent;
+
       html += `
         <div class="card">
-          <div class="card-title">Ability scores</div>
-          <p style="font-size:0.9rem; color:var(--text-dim); margin-bottom:1rem;">Enter your ability scores (after species bonuses if applicable).</p>
+          <div class="card-title">Ability scores — point buy</div>
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem;">
+            <p style="font-size:0.9rem; color:var(--text-dim);">Distribute 27 points. Scores range from 8 to 15 before species bonuses.</p>
+            <div style="font-family:var(--font-display); font-size:1rem; color:${remaining === 0 ? 'var(--green)' : 'var(--gold)'}; white-space:nowrap; margin-left:1rem;">
+              ${remaining} pts left
+            </div>
+          </div>
           <div class="form-row cols-3">
-            ${['strength','dexterity','constitution','intelligence','wisdom','charisma'].map(ab => `
-              <div class="form-group">
-                <label>${ab.charAt(0).toUpperCase() + ab.slice(1)}</label>
-                <input class="form-input" type="number" min="1" max="30" id="ab-${ab}" value="${draft.abilities[ab]}" />
-              </div>
-            `).join('')}
+            ${['strength','dexterity','constitution','intelligence','wisdom','charisma'].map(ab => {
+              const val = draft.abilities[ab];
+              const canInc = val < 15 && (remaining - ((COSTS[val+1]??99) - (COSTS[val]??0))) >= 0;
+              const canDec = val > 8;
+              return `
+                <div style="background:var(--bg-raised); border:1px solid var(--border); border-radius:var(--radius); padding:10px 8px; text-align:center;">
+                  <div class="stat-label">${ab.substring(0,3).toUpperCase()}</div>
+                  <div style="font-size:1.6rem; font-weight:500; margin:6px 0;">${val}</div>
+                  <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">(${val >= 8 && val <= 15 ? COSTS[val] : '?'} pts)</div>
+                  <div style="display:flex; gap:4px; justify-content:center;">
+                    <button class="btn btn-sm pb-dec" data-ab="${ab}" ${canDec?'':'disabled'} style="padding:2px 10px;">−</button>
+                    <button class="btn btn-sm pb-inc" data-ab="${ab}" ${canInc?'':'disabled'} style="padding:2px 10px;">+</button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+          <div style="margin-top:1rem; padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius); font-size:0.85rem; color:var(--text-dim);">
+            <strong style="color:var(--text);">Manual override:</strong> if you need to set a stat above 15 or below 8 (e.g. from Deck of Many Things), use the Admin tab after character creation.
           </div>
         </div>
       `;
@@ -259,9 +287,27 @@ export async function renderCharacterCreation(container, userId, navigate) {
       document.getElementById('f-background').addEventListener('change', e => { draft.backgroundId = e.target.value; });
     }
     if (step === 2) {
-      ['strength','dexterity','constitution','intelligence','wisdom','charisma'].forEach(ab => {
-        document.getElementById(`ab-${ab}`)?.addEventListener('input', e => {
-          draft.abilities[ab] = parseInt(e.target.value) || 10;
+      const COSTS = {8:0,9:1,10:2,11:3,12:4,13:5,14:7,15:9};
+      const TOTAL = 27;
+      function spent() { return Object.values(draft.abilities).reduce((s,v) => s+(COSTS[v]??0), 0); }
+
+      document.querySelectorAll('.pb-inc').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const ab = btn.dataset.ab;
+          const cur = draft.abilities[ab];
+          if (cur >= 15) return;
+          const cost = (COSTS[cur+1]??99) - (COSTS[cur]??0);
+          if (spent() + cost > TOTAL) return;
+          draft.abilities[ab] = cur + 1;
+          renderStep();
+        });
+      });
+      document.querySelectorAll('.pb-dec').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const ab = btn.dataset.ab;
+          if (draft.abilities[ab] <= 8) return;
+          draft.abilities[ab]--;
+          renderStep();
         });
       });
     }
