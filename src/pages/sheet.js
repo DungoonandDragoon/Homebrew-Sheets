@@ -601,13 +601,20 @@ function renderNerveTab(tc) {
       const cost = parseInt(btn.dataset.cost);
       const name = btn.dataset.name;
       mutate(() => { data.nerveDiceCurrent = Math.max(0, (data.nerveDiceCurrent ?? 0) - cost); });
-      // Roll the nerve die for graze
+      // Roll all spent nerve dice and show result
+      let totalRoll = 0;
+      const rolls = [];
+      for (let i = 0; i < cost; i++) {
+        const r = rollDie(nd.dieSize);
+        rolls.push(r);
+        totalRoll += r;
+      }
+      const rollBreakdown = `${cost}d${nd.dieSize} (${rolls.join('+')})`;
       if (name === 'Graze') {
-        const roll = rollDie(nd.dieSize);
-        const total = roll + derived.mods.intelligence;
-        sendRollToDnDBeyond('Graze (damage reduction)', total, `d${nd.dieSize} (${roll}) + Int (${formatMod(derived.mods.intelligence)})`, char.name);
+        const total = totalRoll + derived.mods.intelligence;
+        sendRollToDnDBeyond('Graze (damage reduction)', total, `${rollBreakdown} + Int (${formatMod(derived.mods.intelligence)})`, char.name);
       } else {
-        showMsg(`${name} used. ${cost} Nerve ${cost === 1 ? 'Die' : 'Dice'} spent.`);
+        sendRollToDnDBeyond(`${name}`, totalRoll, rollBreakdown, char.name);
       }
     });
   });
@@ -737,15 +744,61 @@ function renderFeaturesTab(tc) {
 
 function getBuiltinSpeciesTraits(speciesId) {
   const map = {
-    'human':      [{ name: 'Extra language', description: 'You can speak, read, and write one extra language.' }],
-    'elf':        [{ name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light.' }, { name: 'Keen senses', description: 'Proficiency in Perception.' }, { name: 'Fey ancestry', description: 'Advantage on saves against being charmed. Cannot be put to sleep by magic.' }, { name: 'Trance', description: 'You do not need to sleep. Instead you meditate deeply for 4 hours a day.' }],
-    'dwarf':      [{ name: 'Darkvision', description: 'You can see in dim light within 60 feet.' }, { name: 'Dwarven resilience', description: 'Advantage on saves against poison; resistance to poison damage.' }, { name: 'Stonecunning', description: 'Twice proficiency on History checks related to stonework.' }],
-    'halfling':   [{ name: 'Lucky', description: 'When you roll a 1 on an attack, ability check, or save, reroll and use the new result.' }, { name: 'Brave', description: 'Advantage on saves against being frightened.' }, { name: 'Halfling nimbleness', description: 'You can move through the space of a creature larger than you.' }],
-    'gnome':      [{ name: 'Darkvision', description: '60 feet.' }, { name: 'Gnome cunning', description: 'Advantage on Intelligence, Wisdom, and Charisma saves against magic.' }],
-    'half-orc':   [{ name: 'Darkvision', description: '60 feet.' }, { name: 'Relentless endurance', description: 'Once per long rest when reduced to 0 HP, drop to 1 HP instead.' }, { name: 'Savage attacks', description: 'On a crit with a melee weapon, roll one of the damage dice an additional time.' }],
-    'tiefling':   [{ name: 'Darkvision', description: '60 feet.' }, { name: 'Hellish resistance', description: 'Resistance to fire damage.' }, { name: 'Infernal legacy', description: 'Know Thaumaturgy cantrip. At 3rd level: Hellish Rebuke. At 5th level: Darkness.' }],
-    'dragonborn': [{ name: 'Breath weapon', description: 'Exhale destructive energy. DC 8 + Con mod + proficiency. Recharges on short or long rest.' }, { name: 'Damage resistance', description: 'Resistance to the damage type of your draconic ancestry.' }],
-    'half-elf':   [{ name: 'Darkvision', description: '60 feet.' }, { name: 'Fey ancestry', description: 'Advantage on saves against charmed. Cannot be magically put to sleep.' }, { name: 'Skill versatility', description: 'Proficiency in two skills of your choice.' }],
+    'human':      [
+      { name: 'Ability score increase', description: '+1 to all six ability scores.' },
+      { name: 'Extra language', description: 'You can speak, read, and write one extra language of your choice.' },
+    ],
+    'elf':        [
+      { name: 'Ability score increase', description: '+2 Dexterity.' },
+      { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light, and in darkness as if it were dim light.' },
+      { name: 'Keen senses', description: 'Proficiency in the Perception skill.' },
+      { name: 'Fey ancestry', description: 'Advantage on saving throws against being charmed, and magic can\'t put you to sleep.' },
+      { name: 'Trance', description: 'You don\'t need to sleep. Instead, you meditate deeply for 4 hours a day. After resting this way, you gain the same benefit as a human does from 8 hours of sleep.' },
+    ],
+    'dwarf':      [
+      { name: 'Ability score increase', description: '+2 Constitution.' },
+      { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light, and in darkness as if it were dim light.' },
+      { name: 'Dwarven resilience', description: 'Advantage on saving throws against poison, and resistance to poison damage.' },
+      { name: 'Dwarven combat training', description: 'Proficiency with the battleaxe, handaxe, light hammer, and warhammer.' },
+      { name: 'Tool proficiency', description: 'Proficiency with one type of artisan\'s tools of your choice.' },
+      { name: 'Stonecunning', description: 'Whenever you make a History check related to the origin of stonework, you are considered proficient and add double your proficiency bonus.' },
+    ],
+    'halfling':   [
+      { name: 'Ability score increase', description: '+2 Dexterity.' },
+      { name: 'Lucky', description: 'When you roll a 1 on the d20 for an attack roll, ability check, or saving throw, you can reroll the die and must use the new roll.' },
+      { name: 'Brave', description: 'Advantage on saving throws against being frightened.' },
+      { name: 'Halfling nimbleness', description: 'You can move through the space of any creature that is of a size larger than yours.' },
+    ],
+    'gnome':      [
+      { name: 'Ability score increase', description: '+2 Intelligence.' },
+      { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light, and in darkness as if it were dim light.' },
+      { name: 'Gnome cunning', description: 'Advantage on all Intelligence, Wisdom, and Charisma saving throws against magic.' },
+    ],
+    'half-orc':   [
+      { name: 'Ability score increase', description: '+2 Strength, +1 Constitution.' },
+      { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light, and in darkness as if it were dim light.' },
+      { name: 'Menacing', description: 'Proficiency in the Intimidation skill.' },
+      { name: 'Relentless endurance', description: 'When you are reduced to 0 hit points but not killed outright, you can drop to 1 hit point instead. Once you use this trait, you can\'t do so again until you finish a long rest.' },
+      { name: 'Savage attacks', description: 'When you score a critical hit with a melee weapon attack, you can roll one of the weapon\'s damage dice one additional time and add it to the extra damage of the critical hit.' },
+    ],
+    'tiefling':   [
+      { name: 'Ability score increase', description: '+2 Charisma, +1 Intelligence.' },
+      { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light, and in darkness as if it were dim light.' },
+      { name: 'Hellish resistance', description: 'Resistance to fire damage.' },
+      { name: 'Infernal legacy', description: 'You know the Thaumaturgy cantrip. At 3rd level, you can cast Hellish Rebuke as a 2nd-level spell once per long rest. At 5th level, you can cast Darkness once per long rest. Charisma is your spellcasting ability for these spells.' },
+    ],
+    'dragonborn': [
+      { name: 'Ability score increase', description: '+2 Strength, +1 Charisma.' },
+      { name: 'Draconic ancestry', description: 'You have draconic ancestry. Choose one dragon type to determine your damage type and breath weapon shape.' },
+      { name: 'Breath weapon', description: 'You can use your action to exhale destructive energy. Your draconic ancestry determines the size, shape, and damage type. Constitution is the save DC (8 + Con mod + proficiency bonus). You can use your breath weapon once per short or long rest.' },
+      { name: 'Damage resistance', description: 'Resistance to the damage type associated with your draconic ancestry.' },
+    ],
+    'half-elf':   [
+      { name: 'Ability score increase', description: '+2 Charisma, and +1 to two other ability scores of your choice.' },
+      { name: 'Darkvision', description: 'You can see in dim light within 60 feet as if it were bright light, and in darkness as if it were dim light.' },
+      { name: 'Fey ancestry', description: 'Advantage on saving throws against being charmed, and magic can\'t put you to sleep.' },
+      { name: 'Skill versatility', description: 'Proficiency in two skills of your choice.' },
+    ],
   };
   return map[speciesId] || [];
 }
@@ -1352,9 +1405,9 @@ function showLevelUpModal() {
       ` : ''}
 
       <div class="form-group" style="margin-top:0.75rem;">
-        <label>HP gained (d10 + Con mod ${formatMod(derived.mods.constitution)})</label>
+        <label>HP gained (d10 roll — Con mod is applied automatically)</label>
         <div style="display:flex; gap:0.5rem;">
-          <input class="form-input" type="number" id="lvlup-hp" placeholder="${Math.ceil(10/2)+1+derived.mods.constitution}" />
+          <input class="form-input" type="number" id="lvlup-hp" placeholder="${Math.ceil(10/2)+1}" />
           <button class="btn btn-sm" id="roll-hp">Roll</button>
         </div>
       </div>
@@ -1403,7 +1456,7 @@ function showLevelUpModal() {
   });
 
   document.getElementById('roll-hp')?.addEventListener('click', () => {
-    const roll = rollDie(10) + derived.mods.constitution;
+    const roll = rollDie(10);
     document.getElementById('lvlup-hp').value = Math.max(1, roll);
   });
 
@@ -1416,7 +1469,7 @@ function showLevelUpModal() {
       if (!chosen) { alert('Please choose an archetype.'); return; }
     }
 
-    const hpGained = Math.max(1, parseInt(document.getElementById('lvlup-hp')?.value) || (Math.ceil(10/2)+1+derived.mods.constitution));
+    const hpGained = Math.max(1, parseInt(document.getElementById('lvlup-hp')?.value) || (Math.ceil(10/2)+1));
     const isFeatChoice = document.getElementById('asi-feat-radio')?.checked;
     const chosenFeatId = document.getElementById('asi-feat-picker')?.value;
     const chosenArchetype = overlay.querySelector('input[name="lvlup-archetype"]:checked')?.value;
