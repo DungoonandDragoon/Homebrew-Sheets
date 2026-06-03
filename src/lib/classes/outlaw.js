@@ -257,7 +257,7 @@ export const OUTLAW = {
           id: 'signature-move',
           name: 'Signature move',
           level: 7,
-          description: 'Choose one known Trick Shot as your Signature Move. Use it once per turn without expending a Nerve Die (2-die tricks cost 1 die instead). Change on a long rest.',
+          description: 'Choose one known Trick Shot as your Signature Move. Once per turn, that trick shot costs 1 fewer Nerve Die (minimum 1 die). Change your Signature Move on a long rest.',
           hasChoice: true,
         },
         'read-the-tell': {
