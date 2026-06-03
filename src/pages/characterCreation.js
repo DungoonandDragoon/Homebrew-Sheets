@@ -432,23 +432,67 @@ export async function renderCharacterCreation(container, userId, navigate) {
         }
       }
 
-      // Apply homebrew species bonuses — fixed stat-bonus effects auto-applied,
-      // player-choice-stat effects prompted
+      // Apply homebrew species effects — handles fixed values and player-choice effects
       const hbSpecies = homebrew.find(h => h.type === 'species' && (`hb_${h.id}` === draft.speciesId || h.id === draft.speciesId));
       if (hbSpecies?.data?.effects) {
         for (const e of hbSpecies.data.effects) {
-          if (e.type === 'stat-bonus' && e.ability && e.amount) {
-            finalAbilities[e.ability] = Math.min(20, (finalAbilities[e.ability] || 10) + parseInt(e.amount));
-          }
-          if (e.type === 'player-choice-stat' && e.amount) {
+
+          // ── Ability score bonus ──────────────────────────────────────────
+          if (e.type === 'stat-bonus') {
             const amount = parseInt(e.amount || 1);
-            const numChoices = amount === 1 ? 2 : 1;
-            const label = `${hbSpecies.name}: choose ${numChoices} ability score${numChoices > 1 ? 's' : ''} to increase by +${amount}`;
-            const chosen = await showSpeciesStatPickerModal(label, finalAbilities, numChoices, amount, []);
-            if (!chosen) return;
-            for (const ab of chosen) {
-              finalAbilities[ab] = Math.min(20, (finalAbilities[ab] || 10) + amount);
+            if (e.playerChoice) {
+              // Player picks which ability; allowedChoices restricts the pool (empty = any)
+              const pool = e.allowedChoices?.length ? e.allowedChoices
+                : ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
+              const label = `${hbSpecies.name}: choose an ability score to increase by +${amount}`;
+              const chosen = await showSpeciesStatPickerModal(label, finalAbilities, 1, amount, [], pool);
+              if (!chosen) return;
+              for (const ab of chosen) finalAbilities[ab] = Math.min(20, (finalAbilities[ab] || 10) + amount);
+            } else if (e.ability) {
+              finalAbilities[e.ability] = Math.min(20, (finalAbilities[e.ability] || 10) + amount);
             }
+          }
+
+          // ── Skill proficiency (player choice) ───────────────────────────
+          if ((e.type === 'skill-proficiency' || e.type === 'skill-expertise') && e.playerChoice) {
+            const pool = e.allowedChoices?.length ? e.allowedChoices : null;
+            // Store the choice to apply after character creation — handled by character sheet
+            // We record it in draft so it lands in data on save
+            if (!draft.pendingSkillChoices) draft.pendingSkillChoices = [];
+            draft.pendingSkillChoices.push({ type: e.type, pool, source: hbSpecies.name });
+          }
+
+          // ── Language choice ──────────────────────────────────────────────
+          if (e.type === 'language-choice') {
+            // Language picks happen on the Features tab of the sheet, not at creation
+            // Just record how many picks are granted; the pool is stored in the effect
+            // Nothing to do here — sheet.js reads the homebrew effect directly
+          }
+
+          // ── Save proficiency (player choice) ────────────────────────────
+          if (e.type === 'save-proficiency' && e.playerChoice) {
+            const pool = e.allowedChoices?.length ? e.allowedChoices
+              : ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
+            const label = `${hbSpecies.name}: choose a saving throw proficiency`;
+            const chosen = await showSpeciesStatPickerModal(label, {}, 1, 0, [], pool);
+            if (!chosen) return;
+            if (!draft.saveProficiencies.includes(chosen[0])) draft.saveProficiencies.push(chosen[0]);
+          } else if (e.type === 'save-proficiency' && e.ability) {
+            if (!draft.saveProficiencies.includes(e.ability)) draft.saveProficiencies.push(e.ability);
+          }
+
+          // ── Damage resistance (player choice) ───────────────────────────
+          if (e.type === 'damage-resistance' && e.playerChoice) {
+            const pool = e.allowedChoices?.length ? e.allowedChoices
+              : ['Acid','Cold','Fire','Force','Lightning','Necrotic','Piercing','Poison','Psychic','Radiant','Slashing','Thunder'];
+            const label = `${hbSpecies.name}: choose a damage type to be resistant to`;
+            const chosen = await showSpeciesStatPickerModal(label, {}, 1, 0, [], pool);
+            if (!chosen) return;
+            if (!draft.damageResistances) draft.damageResistances = [];
+            draft.damageResistances.push(chosen[0]);
+          } else if (e.type === 'damage-resistance' && e.damageType) {
+            if (!draft.damageResistances) draft.damageResistances = [];
+            draft.damageResistances.push(e.damageType);
           }
         }
       }
@@ -507,10 +551,14 @@ export async function renderCharacterCreation(container, userId, navigate) {
 // Shows a modal asking the player to pick `numChoices` ability scores to
 // increase by `amount`, excluding any in `exclude`. Returns a Promise that
 // resolves to an array of chosen ability names, or null if cancelled.
-function showSpeciesStatPickerModal(label, currentAbilities, numChoices, amount, exclude) {
+function showSpeciesStatPickerModal(label, currentAbilities, numChoices, amount, exclude, pool) {
   return new Promise(resolve => {
     const ALL_ABILITIES = ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
-    const available = ALL_ABILITIES.filter(ab => !exclude.includes(ab) && (currentAbilities[ab] || 10) < 20);
+    // If an explicit pool is provided, use it (e.g. restricted homebrew choices).
+    // Otherwise filter from all abilities excluding `exclude`.
+    const available = pool
+      ? pool.filter(opt => !exclude.includes(opt) && (currentAbilities[opt] === undefined || (currentAbilities[opt] || 10) < 20))
+      : ALL_ABILITIES.filter(ab => !exclude.includes(ab) && (currentAbilities[ab] || 10) < 20);
     let picked = [];
 
     const modal = document.createElement('div');
