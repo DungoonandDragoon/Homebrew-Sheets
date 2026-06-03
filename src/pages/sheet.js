@@ -834,8 +834,19 @@ function renderFeaturesTab(tc) {
   const langChoiceCount = languageChoiceCounts[data.speciesId] || 0;
   // Also check homebrew species for language-choice effects
   const hbSpeciesEntry = homebrew.find(h => h.type === 'species' && (`hb_${h.id}` === data.speciesId || h.id === data.speciesId));
-  const hbLangChoices = hbSpeciesEntry?.data?.effects?.filter(e => e.type === 'language-choice').length || 0;
+  // Collect all language-choice effects from homebrew species, including their pool restrictions
+  const hbLangEffects = hbSpeciesEntry?.data?.effects?.filter(e => e.type === 'language-choice') || [];
+  const hbLangChoices = hbLangEffects.reduce((sum, e) => sum + (parseInt(e.count) || 1), 0);
   const totalLangChoices = langChoiceCount + hbLangChoices;
+
+  // Build the allowed language pool: union of all language-choice effect allowedChoices,
+  // or the full list if any effect has no restriction
+  const hbLangPools = hbLangEffects.map(e => e.allowedChoices?.length ? e.allowedChoices : null);
+  const builtinLangPool = langChoiceCount > 0 ? null : undefined; // built-in (human/half-elf) = any
+  const anyUnrestricted = builtinLangPool === null || hbLangPools.some(p => p === null);
+  const effectiveLangPool = anyUnrestricted
+    ? LANGUAGES  // at least one grant is unrestricted → show all
+    : [...new Set(hbLangPools.flat())]; // all grants restricted → union of allowed
 
   const chosenLangs = data.chosenLanguages || [];
 
@@ -844,9 +855,10 @@ function renderFeaturesTab(tc) {
       <div class="card-title">Species languages (${chosenLangs.length} / ${totalLangChoices} chosen)</div>
       <p style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.75rem;">
         Your species grants you ${totalLangChoices} additional language${totalLangChoices > 1 ? 's' : ''} of your choice.
+        ${!anyUnrestricted ? '<span style="color:var(--gold);">Restricted to the options below.</span>' : ''}
       </p>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.25rem;">
-        ${LANGUAGES.map(lang => {
+        ${effectiveLangPool.map(lang => {
           const isChosen = chosenLangs.includes(lang);
           const canPick = isChosen || chosenLangs.length < totalLangChoices;
           return `<label style="display:flex; gap:0.5rem; align-items:center; padding:0.35rem 0.5rem;
@@ -1650,16 +1662,70 @@ function renderAddFeatSection() {
 }
 
 function wireAddFeat(tc) {
-  tc.querySelector('#add-feat-btn')?.addEventListener('click', () => {
+  tc.querySelector('#add-feat-btn')?.addEventListener('click', async () => {
     const featId = tc.querySelector('#feat-picker')?.value;
     if (!featId) return;
     const feat = homebrew.find(h => h.id === featId);
     if (!feat) return;
+
+    const effects = feat.data?.effects || [];
+    const choiceEffects = effects.filter(e => e.playerChoice);
+    const resolvedChoices = {};
+
+    // Prompt for each player-choice effect before applying
+    for (let ei = 0; ei < effects.length; ei++) {
+      const e = effects[ei];
+      if (!e.playerChoice) continue;
+
+      if (e.type === 'stat-bonus') {
+        const amount = parseInt(e.amount || 1);
+        const pool = e.allowedChoices?.length ? e.allowedChoices
+          : ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
+        const picked = await showStatPickerModal(
+          feat.name + ' — Ability score', 1, amount,
+          pool.filter(ab => (data.abilities[ab] || 10) < 20)
+        );
+        if (!picked) return;
+        resolvedChoices[ei] = picked;
+
+      } else if (e.type === 'skill-proficiency' || e.type === 'skill-expertise') {
+        const pool = e.allowedChoices?.length ? e.allowedChoices
+          : ['Acrobatics','Animal handling','Arcana','Athletics','Deception','History',
+            'Insight','Intimidation','Investigation','Medicine','Nature','Perception',
+            'Performance','Persuasion','Religion','Sleight of hand','Stealth','Survival'];
+        const picked = await showGenericPickerModal(
+          feat.name + ' — ' + (e.type === 'skill-expertise' ? 'Skill expertise' : 'Skill proficiency'),
+          'Choose a skill:', pool, 1
+        );
+        if (!picked) return;
+        resolvedChoices[ei] = picked;
+
+      } else if (e.type === 'save-proficiency') {
+        const pool = e.allowedChoices?.length ? e.allowedChoices
+          : ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
+        const picked = await showGenericPickerModal(
+          feat.name + ' — Saving throw proficiency', 'Choose a saving throw:', pool, 1
+        );
+        if (!picked) return;
+        resolvedChoices[ei] = picked;
+
+      } else if (e.type === 'damage-resistance') {
+        const pool = e.allowedChoices?.length ? e.allowedChoices
+          : ['Acid','Cold','Fire','Force','Lightning','Necrotic','Piercing','Poison','Psychic','Radiant','Slashing','Thunder'];
+        const picked = await showGenericPickerModal(
+          feat.name + ' — Damage resistance', 'Choose a damage type:', pool, 1
+        );
+        if (!picked) return;
+        resolvedChoices[ei] = picked;
+      }
+    }
+
     mutate(() => {
       data.feats = data.feats || [];
       if (!data.feats.find(f => f.id === featId)) {
-        data.feats.push({ id: featId, name: feat.name, description: feat.data?.description || '', effects: feat.data?.effects || [] });
+        data.feats.push({ id: featId, name: feat.name, description: feat.data?.description || '', effects });
       }
+      applyFeatEffects(effects, resolvedChoices);
     });
     showMsg(`${feat.name} added.`);
   });
@@ -1827,15 +1893,67 @@ function showLevelUpModal() {
     const chosenFeatId = document.getElementById('asi-feat-picker')?.value;
     const chosenArchetype = overlay.querySelector('input[name="lvlup-archetype"]:checked')?.value;
 
-    // If the chosen feat has player-choice-stat effects, show a picker first
+    // If the chosen feat has any player-choice effects, prompt for each before applying
     if (isASI && isFeatChoice && chosenFeatId) {
       const feat = homebrew.find(h => h.id === chosenFeatId);
-      const choiceEffects = feat?.data?.effects?.filter(e => e.type === 'player-choice-stat') || [];
+      const effects = feat?.data?.effects || [];
+      const choiceEffects = effects.filter(e => e.playerChoice);
+
       if (choiceEffects.length > 0) {
-        const amount = parseInt(choiceEffects[0].amount || 1);
-        const numChoices = amount === 1 ? 2 : 1; // +2 to one stat, or +1 to two stats
-        const picked = await showStatPickerModal(feat.name, numChoices, amount === 1 ? 1 : 2);
-        if (!picked) return; // player cancelled
+        // Collect all choices before mutating state
+        const resolvedChoices = {}; // effect index -> chosen value(s)
+        for (let ei = 0; ei < effects.length; ei++) {
+          const e = effects[ei];
+          if (!e.playerChoice) continue;
+
+          if (e.type === 'stat-bonus') {
+            const amount = parseInt(e.amount || 1);
+            const pool = e.allowedChoices?.length ? e.allowedChoices
+              : ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
+            const picked = await showStatPickerModal(
+              feat.name + ' — Ability score',
+              1, amount,
+              pool.filter(ab => (data.abilities[ab] || 10) < 20)
+            );
+            if (!picked) return;
+            resolvedChoices[ei] = picked;
+
+          } else if (e.type === 'skill-proficiency' || e.type === 'skill-expertise') {
+            const pool = e.allowedChoices?.length ? e.allowedChoices : null;
+            const picked = await showGenericPickerModal(
+              feat.name + ' — ' + (e.type === 'skill-expertise' ? 'Skill expertise' : 'Skill proficiency'),
+              'Choose a skill:',
+              pool || ['Acrobatics','Animal handling','Arcana','Athletics','Deception','History',
+                'Insight','Intimidation','Investigation','Medicine','Nature','Perception',
+                'Performance','Persuasion','Religion','Sleight of hand','Stealth','Survival'],
+              1
+            );
+            if (!picked) return;
+            resolvedChoices[ei] = picked;
+
+          } else if (e.type === 'save-proficiency') {
+            const pool = e.allowedChoices?.length ? e.allowedChoices
+              : ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
+            const picked = await showGenericPickerModal(
+              feat.name + ' — Saving throw proficiency',
+              'Choose a saving throw:',
+              pool, 1
+            );
+            if (!picked) return;
+            resolvedChoices[ei] = picked;
+
+          } else if (e.type === 'damage-resistance') {
+            const pool = e.allowedChoices?.length ? e.allowedChoices
+              : ['Acid','Cold','Fire','Force','Lightning','Necrotic','Piercing','Poison','Psychic','Radiant','Slashing','Thunder'];
+            const picked = await showGenericPickerModal(
+              feat.name + ' — Damage resistance',
+              'Choose a damage type to be resistant to:',
+              pool, 1
+            );
+            if (!picked) return;
+            resolvedChoices[ei] = picked;
+          }
+        }
 
         mutate(() => {
           char.level = newLevel;
@@ -1847,7 +1965,7 @@ function showLevelUpModal() {
           if (!data.feats.find(f => f.id === chosenFeatId)) {
             data.feats.push({ id: chosenFeatId, name: feat.name, description: feat.data?.description || '', effects: feat.data?.effects || [] });
           }
-          applyFeatEffects(feat.data?.effects || [], picked);
+          applyFeatEffects(effects, resolvedChoices);
         });
         await saveCharacter({ ...char, data }, userId);
         overlay.remove();
@@ -1891,9 +2009,9 @@ function showLevelUpModal() {
   });
 }
 
-function showStatPickerModal(featName, numChoices, pointsPerChoice) {
+function showStatPickerModal(featName, numChoices, pointsPerChoice, pool) {
   return new Promise(resolve => {
-    const ABILITIES_LIST = ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
+    const ABILITIES_LIST = pool || ['strength','dexterity','constitution','intelligence','wisdom','charisma'];
     let picked = [];
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
@@ -1936,23 +2054,119 @@ function showStatPickerModal(featName, numChoices, pointsPerChoice) {
   });
 }
 
-function applyFeatEffects(effects, chosenStats) {
-  for (const e of effects) {
-    if (e.type === 'stat-bonus' && e.ability && e.amount) {
-      data.abilities[e.ability] = Math.min(20, (data.abilities[e.ability] || 10) + parseInt(e.amount));
-    }
-    if (e.type === 'player-choice-stat' && chosenStats?.length) {
-      // chosenStats is array of ability names the player chose
-      chosenStats.forEach(ab => {
-        data.abilities[ab] = Math.min(20, (data.abilities[ab] || 10) + parseInt(e.amount || 1));
+// Generic single/multi picker — used for skill, save, and damage-resistance player choices
+function showGenericPickerModal(title, prompt, options, numChoices) {
+  return new Promise(resolve => {
+    let picked = [];
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+      <div class="modal">
+        <div class="modal-title">${title}</div>
+        <p style="font-size:0.88rem; color:var(--text-dim); margin-bottom:1rem;">${prompt}</p>
+        <div style="display:flex; flex-direction:column; gap:0.35rem;">
+          ${options.map(opt => `
+            <label style="display:flex; gap:0.75rem; align-items:center; padding:0.5rem;
+              border-radius:var(--radius); cursor:pointer; border:1px solid var(--border);">
+              <input type="${numChoices === 1 ? 'radio' : 'checkbox'}" name="gen-pick" value="${opt}" />
+              <span style="text-transform:capitalize;">${opt}</span>
+            </label>
+          `).join('')}
+        </div>
+        <div id="gen-pick-count" style="font-size:0.85rem; color:var(--gold); margin-top:0.75rem;">
+          ${numChoices > 1 ? 'Selected: 0 / ' + numChoices : ''}
+        </div>
+        <div class="modal-footer">
+          <button class="btn" id="gen-pick-cancel">Cancel</button>
+          <button class="btn btn-gold" id="gen-pick-confirm" ${numChoices === 1 ? '' : 'disabled'}>Confirm</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelectorAll('input[name="gen-pick"]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (numChoices === 1) {
+          picked = [cb.value];
+          modal.querySelector('#gen-pick-confirm').disabled = false;
+        } else {
+          if (cb.checked) picked.push(cb.value);
+          else picked = picked.filter(v => v !== cb.value);
+          if (picked.length > numChoices) { cb.checked = false; picked = picked.filter(v => v !== cb.value); }
+          modal.querySelector('#gen-pick-count').textContent = 'Selected: ' + picked.length + ' / ' + numChoices;
+          modal.querySelector('#gen-pick-confirm').disabled = picked.length !== numChoices;
+        }
       });
+    });
+    modal.querySelector('#gen-pick-cancel').addEventListener('click', () => { modal.remove(); resolve(null); });
+    modal.querySelector('#gen-pick-confirm').addEventListener('click', () => { modal.remove(); resolve(picked); });
+  });
+}
+
+function applyFeatEffects(effects, resolvedChoices) {
+  // resolvedChoices: object keyed by effect index -> array of chosen values
+  // For backwards compatibility also accepts a plain array (old player-choice-stat path)
+  const choicesMap = Array.isArray(resolvedChoices)
+    ? {}  // legacy path — no longer used but safe
+    : (resolvedChoices || {});
+
+  effects.forEach((e, ei) => {
+    const chosen = choicesMap[ei] || [];
+
+    if (e.type === 'stat-bonus') {
+      const amount = parseInt(e.amount || 1);
+      if (e.playerChoice && chosen.length) {
+        chosen.forEach(ab => {
+          data.abilities[ab] = Math.min(20, (data.abilities[ab] || 10) + amount);
+        });
+      } else if (!e.playerChoice && e.ability) {
+        data.abilities[e.ability] = Math.min(20, (data.abilities[e.ability] || 10) + amount);
+      }
     }
-    if (e.type === 'skill-proficiency' && e.skill) {
-      const camel = toCamelCase(e.skill.toLowerCase().replace(/\s+/g, ''));
-      data.skillProficiencies = data.skillProficiencies || [];
-      if (!data.skillProficiencies.includes(camel)) data.skillProficiencies.push(camel);
+
+    if (e.type === 'skill-proficiency') {
+      const skillName = e.playerChoice ? chosen[0] : e.skill;
+      if (skillName) {
+        const camel = toCamelCase(skillName);
+        data.skillProficiencies = data.skillProficiencies || [];
+        if (!data.skillProficiencies.includes(camel)) data.skillProficiencies.push(camel);
+      }
     }
-  }
+
+    if (e.type === 'skill-expertise') {
+      const skillName = e.playerChoice ? chosen[0] : e.skill;
+      if (skillName) {
+        const camel = toCamelCase(skillName);
+        data.skillExpertise = data.skillExpertise || [];
+        if (!data.skillExpertise.includes(camel)) data.skillExpertise.push(camel);
+      }
+    }
+
+    if (e.type === 'save-proficiency') {
+      const save = e.playerChoice ? chosen[0] : e.ability;
+      if (save) {
+        data.saveProficiencies = data.saveProficiencies || [];
+        if (!data.saveProficiencies.includes(save)) data.saveProficiencies.push(save);
+      }
+    }
+
+    if (e.type === 'damage-resistance') {
+      const dmg = e.playerChoice ? chosen[0] : e.damageType;
+      if (dmg) {
+        data.damageResistances = data.damageResistances || [];
+        if (!data.damageResistances.includes(dmg)) data.damageResistances.push(dmg);
+      }
+    }
+
+    if (e.type === 'ac-bonus' && e.amount)         data.acBonus      = (data.acBonus || 0) + parseInt(e.amount);
+    if (e.type === 'initiative-bonus' && e.amount)  data.initBonus    = (data.initBonus || 0) + parseInt(e.amount);
+    if (e.type === 'speed-bonus' && e.amount)       data.speedBonus   = (data.speedBonus || 0) + parseInt(e.amount);
+    if (e.type === 'condition-immunity' && e.condition) {
+      data.conditionImmunities = data.conditionImmunities || [];
+      if (!data.conditionImmunities.includes(e.condition)) data.conditionImmunities.push(e.condition);
+    }
+    // language-choice and passive/limited-use don't mutate abilities — they display on the sheet
+  });
 }
 
 function toCamelCase(s) {
