@@ -94,6 +94,7 @@ function renderSheetUI() {
     { id:'features', label:'Features' },
     { id:'inventory',label:'Inventory' },
     ...(data.archetypeId === 'arcane-artillerist' ? [{ id:'spells', label:'Spells' }] : []),
+    ...(data.archetypeId === 'gunslinger' && char.level >= 3 ? [{ id:'trickshots', label:'Trick Shots' }] : []),
     { id:'notes',    label:'Notes' },
     ...(isDM ? [{ id:'admin', label:'Admin (DM)' }] : []),
   ];
@@ -134,7 +135,7 @@ function renderSheetUI() {
             <button class="btn btn-sm" id="hp-dmg">Damage</button>
             <button class="btn btn-sm btn-gold" id="hp-heal">Heal</button>
             <button class="btn btn-sm" id="hp-temp">Set temp HP</button>
-            <button class="btn btn-sm" id="hp-hitdie">Hit die (d${prog?.nerveDieSize || 10})</button>
+            <button class="btn btn-sm" id="hp-hitdie">Hit die (d${OUTLAW.hitDie || 10})</button>
           </div>
         </div>
         <div>
@@ -248,6 +249,7 @@ function renderSheetUI() {
   else if (activeTab === 'features') renderFeaturesTab(tc);
   else if (activeTab === 'inventory') renderInventoryTab(tc);
   else if (activeTab === 'spells') renderSpellsTab(tc);
+  else if (activeTab === 'trickshots') renderTrickShotsTab(tc);
   else if (activeTab === 'notes') renderNotesTab(tc);
   else if (activeTab === 'admin') renderAdminTab(tc);
 }
@@ -298,6 +300,7 @@ function renderCoreTab(tc) {
       </div>
     </div>
     ${renderFeatsCard()}
+    ${renderProficienciesCard()}
   `;
 
   // Ability check rolls
@@ -345,6 +348,32 @@ function renderFeatsCard() {
   </div>`;
 }
 
+function renderProficienciesCard() {
+  const profs = data.proficiencies || {};
+  const armor = profs.armor || 'Light armor, Medium armor, Shields';
+  const weapons = profs.weapons || 'Simple weapons, Firearms, Hand crossbows, Shortswords';
+  const tools = profs.tools || '—';
+  const languages = ['Common', ...(data.chosenLanguages || [])].filter((v, i, a) => a.indexOf(v) === i);
+  // Add species-granted fixed languages
+  const speciesLanguages = {
+    'elf': ['Elvish'], 'dwarf': ['Dwarvish'], 'halfling': ['Halfling'],
+    'gnome': ['Gnomish'], 'half-orc': ['Orc'], 'tiefling': ['Infernal'],
+    'dragonborn': ['Draconic'], 'half-elf': ['Elvish'],
+  };
+  const specLangs = speciesLanguages[data.speciesId] || [];
+  const allLangs = [...new Set(['Common', ...specLangs, ...(data.chosenLanguages || [])])];
+
+  return `<div class="card" style="margin-top:1rem;">
+    <div class="card-title">Proficiencies</div>
+    <div style="display:grid; gap:0.5rem; font-size:0.88rem;">
+      <div><span style="color:var(--text-muted); font-family:var(--font-display); font-size:0.7rem; letter-spacing:0.08em; text-transform:uppercase;">Armor</span><div style="color:var(--text); margin-top:0.2rem;">${armor}</div></div>
+      <div><span style="color:var(--text-muted); font-family:var(--font-display); font-size:0.7rem; letter-spacing:0.08em; text-transform:uppercase;">Weapons</span><div style="color:var(--text); margin-top:0.2rem;">${weapons}</div></div>
+      <div><span style="color:var(--text-muted); font-family:var(--font-display); font-size:0.7rem; letter-spacing:0.08em; text-transform:uppercase;">Tools</span><div style="color:var(--text); margin-top:0.2rem;">${tools}</div></div>
+      <div><span style="color:var(--text-muted); font-family:var(--font-display); font-size:0.7rem; letter-spacing:0.08em; text-transform:uppercase;">Languages</span><div style="color:var(--text); margin-top:0.2rem;">${allLangs.join(', ') || 'Common'}</div></div>
+    </div>
+  </div>`;
+}
+
 // ── COMBAT TAB ────────────────────────────────────────────────────────────────
 function renderCombatTab(tc) {
   const inv = data.inventory || [];
@@ -380,6 +409,7 @@ function renderCombatTab(tc) {
     ${char.class_id === 'outlaw' && data.archetypeId === 'gunslinger' && char.level >= 3 ? renderTrickShotPanel() : ''}
     ${char.class_id === 'outlaw' && data.archetypeId === 'desperado' && char.level >= 3 ? renderDesperadoPanel() : ''}
     ${char.level >= 13 && char.class_id === 'outlaw' ? renderCalledShotPanel() : ''}
+    ${data.archetypeId === 'arcane-artillerist' ? renderCombatSpellsPanel() : ''}
   `;
 
   tc.querySelectorAll('.quick-die').forEach(btn => {
@@ -430,6 +460,35 @@ function renderCombatTab(tc) {
     });
   });
 
+  // Combat spell panel buttons
+  tc.querySelectorAll('.spell-atk-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const roll = rollDie(20);
+      const total = roll + derived.spellAttackBonus;
+      const isCrit = roll === 20;
+      sendRollToDnDBeyond(`Spell attack${isCrit?' (CRIT!)':''}`, total, `d20 (${roll}) ${formatMod(derived.spellAttackBonus)}`, char.name);
+    });
+  });
+  tc.querySelectorAll('.spell-dmg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const [count, sides] = btn.dataset.dice.split('d').map(Number);
+      const { total, rolls } = rollDice(count, sides);
+      sendRollToDnDBeyond('Spell damage', total, `${btn.dataset.dice} (${rolls.join('+')})`, char.name);
+    });
+  });
+  tc.querySelectorAll('.spell-slot-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const level = parseInt(btn.dataset.level);
+      const slotsRow = OUTLAW.archetypes['arcane-artillerist'].spellcasting.slots.find(r => r.level === char.level);
+      const max = slotsRow?.[`s${level}`] || 0;
+      mutate(() => {
+        const used = (data.spellSlotsUsed || {})[level] || 0;
+        data.spellSlotsUsed = { ...data.spellSlotsUsed, [level]: Math.min(max, used + 1) };
+      });
+      showMsg(`Level ${level} spell slot used.`);
+    });
+  });
+
   // Reckless fusillade
   document.getElementById('rf-use')?.addEventListener('click', () => {
     mutate(() => {
@@ -467,6 +526,49 @@ function renderAttackRow(item) {
         ${item.damage || '1d4'} ${formatMod(damageBonus)}
       </button>
     </div>
+  </div>`;
+}
+
+function renderCombatSpellsPanel() {
+  const allSpells = WIZARD_SPELLS;
+  const activeSpells = [
+    ...(data.cantrips || []).map(id => allSpells.find(s => s.id === id)).filter(Boolean),
+    ...(data.preparedSpells || []).map(id => allSpells.find(s => s.id === id)).filter(Boolean),
+  ];
+  // Only show spells that involve an attack roll or a saving throw
+  const combatSpells = activeSpells.filter(s => {
+    const d = s.description.toLowerCase();
+    return d.includes('spell attack') || d.includes(' save') || d.includes('saving throw');
+  });
+  if (combatSpells.length === 0) return '';
+
+  const slotsRow = OUTLAW.archetypes['arcane-artillerist'].spellcasting.slots.find(r => r.level === char.level);
+
+  return `<div class="card" style="margin-bottom:1rem;">
+    <div class="card-title">Spell attacks & saves · DC ${derived.spellSaveDC} · Atk ${formatMod(derived.spellAttackBonus)}</div>
+    ${combatSpells.map(s => {
+      const d = s.description.toLowerCase();
+      const isAttack = d.includes('spell attack');
+      const saveMatch = s.description.match(/\b(Str|Dex|Con|Int|Wis|Cha)\w* sav/i);
+      const saveType = saveMatch ? saveMatch[0].replace(/sav.*/i, 'save').trim() : null;
+      const dmgMatch = s.description.match(/\d+d\d+/);
+      const dmgDice = dmgMatch ? dmgMatch[0] : null;
+      const hasSlot = s.level > 0 && slotsRow && (slotsRow[`s${s.level}`] > 0);
+      const slotUsed = s.level > 0 ? ((data.spellSlotsUsed || {})[s.level] || 0) >= (slotsRow?.[`s${s.level}`] || 0) : false;
+      return `<div class="attack-row">
+        <div>
+          <div class="attack-name">${s.name} ${s.concentration ? '<span style="font-size:0.7rem;color:var(--blue);">Conc</span>' : ''}</div>
+          <div class="attack-detail">${s.castTime} · ${s.range}${s.level > 0 ? ' · Level ' + s.level + ' slot' : ' · Cantrip'}</div>
+          <div class="attack-detail" style="color:var(--text-dim); font-size:0.8rem;">${isAttack ? 'Spell attack roll' : saveType ? saveType + ' DC ' + derived.spellSaveDC : 'See description'}</div>
+        </div>
+        <div class="attack-btns">
+          ${isAttack ? `<button class="btn btn-sm btn-gold spell-atk-btn" data-id="${s.id}" ${slotUsed?'disabled':''}>${formatMod(derived.spellAttackBonus)} to hit</button>` : ''}
+          ${saveType ? `<span class="badge badge-gold" style="align-self:center;">DC ${derived.spellSaveDC} ${saveType}</span>` : ''}
+          ${dmgDice ? `<button class="btn btn-sm spell-dmg-btn" data-dice="${dmgDice}" data-id="${s.id}" ${slotUsed?'disabled':''}>${dmgDice}</button>` : ''}
+          ${s.level > 0 ? `<button class="btn btn-sm spell-slot-btn" data-level="${s.level}" ${slotUsed?'disabled':''}>Use slot</button>` : ''}
+        </div>
+      </div>`;
+    }).join('')}
   </div>`;
 }
 
@@ -554,17 +656,28 @@ function renderNerveTab(tc) {
     </div>
     <div class="card">
       <div class="card-title">Spend nerve dice</div>
-      ${OUTLAW.nerveDiceOptions.filter(o => char.level >= o.levelRequired).map(o => `
-        <div class="nerve-action">
-          <div class="nerve-action-info">
-            <div class="nerve-action-name">${o.name}</div>
-            <div class="nerve-action-meta">${o.action} · ${o.description}</div>
-          </div>
-          <div class="nerve-cost">${o.cost} die</div>
-          <button class="btn btn-sm nd-spend ${current < o.cost ? '' : 'btn-gold'}"
-            data-cost="${o.cost}" data-name="${o.name}" ${current < o.cost ? 'disabled' : ''}>Use</button>
-        </div>
-      `).join('')}
+      ${(() => {
+        const baseOptions = OUTLAW.nerveDiceOptions.filter(o => char.level >= o.levelRequired);
+        const archOptions = (data.archetypeId && OUTLAW.archetypes[data.archetypeId]?.nerveDiceOptions || [])
+          .filter(o => char.level >= o.levelRequired);
+        return [...baseOptions, ...archOptions].map(o => {
+            const suppDC = 8 + derived.prof + derived.mods.dexterity;
+            let desc = o.description
+              .replace('DC = 8 + proficiency + Dex mod', `DC ${suppDC}`)
+              .replace('DC = 8 + proficiency bonus + Dex mod', `DC ${suppDC}`);
+            return `
+              <div class="nerve-action">
+                <div class="nerve-action-info">
+                  <div class="nerve-action-name">${o.name}</div>
+                  <div class="nerve-action-meta">${o.action} · ${desc}</div>
+                </div>
+                <div class="nerve-cost">${o.cost} die</div>
+                <button class="btn btn-sm nd-spend ${current < o.cost ? '' : 'btn-gold'}"
+                  data-cost="${o.cost}" data-name="${o.name}" ${current < o.cost ? 'disabled' : ''}>Use</button>
+              </div>
+            `;
+          }).join('');
+      })()}
     </div>
   `;
 
@@ -636,15 +749,40 @@ function renderFeaturesTab(tc) {
   let html = `<div class="card" style="margin-bottom:1rem;">
     <div class="card-title">Class features · Level ${char.level}</div>
     ${unlocked.length === 0 ? '<div style="color:var(--text-muted);">No features yet.</div>' : ''}
-    ${unlocked.map(f => `
-      <div class="feature-item">
-        <div class="feature-name">
-          ${f.name}
-          <span class="feature-level">Level ${f.level}</span>
+    ${unlocked.map(f => {
+      // Inject live DCs into descriptions
+      let desc = f.description;
+      if (f.id === 'called-shot' || f.id === 'suppressing-fire') {
+        desc = desc.replace(/DC = 8 \+ proficiency bonus \+ Dexterity modifier/g,
+          `DC ${derived.calledShotDC || derived.trickShotDC || (8 + derived.prof + derived.mods.dexterity)}`);
+        desc = desc.replace(/DC = 8 \+ proficiency \+ Dex mod/g,
+          `DC ${8 + derived.prof + derived.mods.dexterity}`);
+      }
+      if (f.id === 'showstopper') {
+        desc = desc.replace(/DC = Trick Shot DC/g, `DC ${derived.trickShotDC}`);
+        desc = desc.replace(/Trick Shot DC\)/g, `Trick Shot DC ${derived.trickShotDC})`);
+      }
+      if (f.id === 'runic-barrel') {
+        desc = desc.replace(/Con save/g, `Con save (DC ${derived.spellSaveDC})`);
+      }
+      if (f.id === 'arcane-overload') {
+        desc = desc.replace(/Con save/g, `Con save (DC ${derived.spellSaveDC})`);
+        desc = desc.replace(/Str save/g, `Str save (DC ${derived.spellSaveDC})`);
+      }
+      if (f.id === 'unbreakable') {
+        desc = desc.replace(/spend 2 Nerve Dice to succeed/g,
+          `spend 2 Nerve Dice to succeed (auto-success)`);
+      }
+      return `
+        <div class="feature-item">
+          <div class="feature-name">
+            ${f.name}
+            <span class="feature-level">Level ${f.level}</span>
+          </div>
+          <div class="feature-desc">${desc}</div>
         </div>
-        <div class="feature-desc">${f.description}</div>
-      </div>
-    `).join('')}
+      `;
+    }).join('')}
   </div>`;
 
   // Species features
@@ -681,34 +819,68 @@ function renderFeaturesTab(tc) {
     </div>`;
   }
 
-  // Signature move picker for Gunslinger
-  if (data.archetypeId === 'gunslinger' && char.level >= 7) {
-    const known = data.selectedTrickShots || [];
-    const shots = OUTLAW.archetypes.gunslinger.trickShots.options.filter(s => known.includes(s.id));
+  // Note: Signature move and trick shot selection are managed in the Trick Shots tab.
+
+  // Language choices for species with free language picks
+  const LANGUAGES = ['Abyssal','Aquan','Auran','Celestial','Common','Deep Speech','Draconic',
+    'Druidic','Dwarvish','Elvish','Giant','Gnomish','Goblin','Gnoll','Halfling',
+    'Ignan','Infernal','Orc','Primordial','Sylvan','Terran','Thieves Cant','Undercommon'];
+
+  // How many free language choices does this species get?
+  const languageChoiceCounts = {
+    'human': 1,
+    'half-elf': 1,
+  };
+  const langChoiceCount = languageChoiceCounts[data.speciesId] || 0;
+  // Also check homebrew species for language-choice effects
+  const hbSpeciesEntry = homebrew.find(h => h.type === 'species' && (`hb_${h.id}` === data.speciesId || h.id === data.speciesId));
+  const hbLangChoices = hbSpeciesEntry?.data?.effects?.filter(e => e.type === 'language-choice').length || 0;
+  const totalLangChoices = langChoiceCount + hbLangChoices;
+
+  const chosenLangs = data.chosenLanguages || [];
+
+  if (totalLangChoices > 0) {
     html += `<div class="card" style="margin-bottom:1rem;">
-      <div class="card-title">Signature move</div>
-      <div class="form-group">
-        <label>Current signature move</label>
-        <select class="form-select" id="sig-picker">
-          <option value="">— None selected —</option>
-          ${shots.map(s => `<option value="${s.id}" ${data.signatureMove===s.id?'selected':''}>${s.name} (${s.cost} die → ${Math.max(0,s.cost-1)} die)</option>`).join('')}
-        </select>
+      <div class="card-title">Species languages (${chosenLangs.length} / ${totalLangChoices} chosen)</div>
+      <p style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.75rem;">
+        Your species grants you ${totalLangChoices} additional language${totalLangChoices > 1 ? 's' : ''} of your choice.
+      </p>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.25rem;">
+        ${LANGUAGES.map(lang => {
+          const isChosen = chosenLangs.includes(lang);
+          const canPick = isChosen || chosenLangs.length < totalLangChoices;
+          return `<label style="display:flex; gap:0.5rem; align-items:center; padding:0.35rem 0.5rem;
+            border-radius:var(--radius); cursor:pointer;
+            background:${isChosen ? 'var(--gold-glow)' : 'transparent'};">
+            <input type="checkbox" class="lang-pick" value="${lang}"
+              ${isChosen ? 'checked' : ''} ${!canPick ? 'disabled' : ''} />
+            <span style="font-size:0.88rem;">${lang}</span>
+          </label>`;
+        }).join('')}
       </div>
-      <div style="font-size:0.85rem; color:var(--text-dim);">You can change your Signature Move on a long rest.</div>
     </div>`;
   }
 
   // Rune tracker for Arcane Artillerist
   if (data.archetypeId === 'arcane-artillerist' && char.level >= 7) {
-    html += `<div class="card" style="margin-bottom:1rem;">
-      <div class="card-title">Runic barrel</div>
+    const runeDescs = {
+      'None':  'No rune inscribed.',
+      'Flare': `+1d6 fire damage, bypasses fire resistance. ${char.level >= 15 ? `Arcane Overload: Con save DC ${derived.spellSaveDC} or blinded until end of next turn.` : ''}`,
+      'Force': `Bypasses physical resistance, pushes 5ft on hit. ${char.level >= 15 ? `Arcane Overload: Str save DC ${derived.spellSaveDC} or knocked prone and pushed 10ft.` : ''}`,
+      'Storm': `+1d6 lightning damage. Con save DC ${derived.spellSaveDC} or lose reaction until start of next turn. ${char.level >= 15 ? `Arcane Overload: Con save DC ${derived.spellSaveDC} or lose concentration and can't cast concentration spells until end of next turn.` : ''}`,
+      'Void':  `Deals necrotic instead of piercing. On crit: prevents HP regain until start of your next turn. ${char.level >= 15 ? `Arcane Overload: Con save DC ${derived.spellSaveDC} or gain one exhaustion level.` : ''}`,
+    };
+    const activeRune = data.runeActive || 'None';
+    html += \`<div class="card" style="margin-bottom:1rem;">
+      <div class="card-title">Runic barrel · Save DC \${derived.spellSaveDC}</div>
       <div class="form-group">
         <label>Active rune</label>
         <select class="form-select" id="rune-picker">
-          ${['None','Flare','Force','Storm','Void'].map(r => `<option value="${r}" ${(data.runeActive||'None')===r?'selected':''}>${r}</option>`).join('')}
+          \${['None','Flare','Force','Storm','Void'].map(r => \`<option value="\${r}" \${activeRune===r?'selected':''}>\${r}</option>\`).join('')}
         </select>
       </div>
-    </div>`;
+      <div style="font-size:0.85rem; color:var(--text-dim); margin-top:0.4rem;">\${runeDescs[activeRune]}</div>
+    </div>\`;
   }
 
   // ALL upcoming features (no slice limit)
@@ -734,11 +906,25 @@ function renderFeaturesTab(tc) {
 
   tc.innerHTML = html;
 
-  document.getElementById('sig-picker')?.addEventListener('change', e => {
-    mutate(() => { data.signatureMove = e.target.value || null; });
-  });
   document.getElementById('rune-picker')?.addEventListener('change', e => {
     mutate(() => { data.runeActive = e.target.value; });
+  });
+
+  // Language choices
+  tc.querySelectorAll('.lang-pick').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const lang = cb.value;
+      mutate(() => {
+        const langs = [...(data.chosenLanguages || [])];
+        if (cb.checked) {
+          if (!langs.includes(lang)) langs.push(lang);
+        } else {
+          const idx = langs.indexOf(lang);
+          if (idx > -1) langs.splice(idx, 1);
+        }
+        data.chosenLanguages = langs;
+      });
+    });
   });
 }
 
@@ -1214,6 +1400,137 @@ function showSpellPicker(spells, selected, filterLevel, max) {
   });
 }
 
+// ── TRICK SHOTS TAB (Gunslinger only) ────────────────────────────────────────
+function renderTrickShotsTab(tc) {
+  const allShots = OUTLAW.archetypes.gunslinger.trickShots.options;
+  const known = data.selectedTrickShots || [];
+  const sig = data.signatureMove;
+  const totalAllowed = (() => {
+    const { startCount, additionalLevels } = OUTLAW.archetypes.gunslinger.trickShots;
+    return startCount + additionalLevels.filter(l => l <= char.level).length;
+  })();
+  const nd = data.nerveDiceCurrent || 0;
+  const ndMax = data.nerveDiceCurrent ?? 0;
+
+  let html = `
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="section-header">
+        <div class="card-title" style="margin:0;">Known trick shots (${known.length} / ${totalAllowed})</div>
+        <div style="font-size:0.85rem; color:var(--text-dim);">Trick Shot DC: <strong>${derived.trickShotDC}</strong></div>
+      </div>
+      <p style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.75rem;">Trick shots are declared after your attack roll but before damage is rolled.</p>
+      <div style="display:flex; flex-direction:column; gap:0.4rem;">
+        ${allShots.map(s => {
+          const isKnown = known.includes(s.id);
+          const isSig = sig === s.id;
+          const effectiveCost = isSig ? Math.max(0, s.cost - 1) : s.cost;
+          const canSelect = isKnown || known.length < totalAllowed;
+          return `
+            <div style="border:1px solid ${isKnown ? 'var(--gold-dim)' : 'var(--border)'}; border-radius:var(--radius); padding:0.6rem 0.75rem; background:${isKnown ? 'var(--gold-glow)' : 'var(--bg-raised)'};">
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <input type="checkbox" class="ts-select" data-id="${s.id}" ${isKnown ? 'checked' : ''} ${!canSelect ? 'disabled' : ''} />
+                <div style="flex:1;">
+                  <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                    <span style="font-weight:500;">${s.name}</span>
+                    <span style="font-size:0.75rem; color:var(--text-muted);">${s.cost} Nerve ${s.cost === 1 ? 'Die' : 'Dice'}</span>
+                    ${isSig ? '<span style="font-size:0.72rem; color:var(--green); font-family:var(--font-display); letter-spacing:0.08em;">SIGNATURE</span>' : ''}
+                  </div>
+                  <div style="font-size:0.83rem; color:var(--text-dim); margin-top:0.2rem;">${s.description}</div>
+                  ${s.id === 'disarming-shot' || s.id === 'pinning-shot' ? `<div style="font-size:0.8rem; color:var(--gold); margin-top:0.2rem;">Strength save DC ${derived.trickShotDC}</div>` : ''}
+                  ${s.id === 'warning-shot' ? `<div style="font-size:0.8rem; color:var(--gold); margin-top:0.2rem;">Wisdom save DC ${derived.trickShotDC}</div>` : ''}
+                  ${s.id === 'shatter-shot' ? `<div style="font-size:0.8rem; color:var(--gold); margin-top:0.2rem;">Constitution save DC ${derived.trickShotDC} (target has disadvantage)</div>` : ''}
+                </div>
+                ${isKnown ? `<button class="btn btn-sm trick-use ${nd < effectiveCost ? '' : 'btn-gold'}"
+                  data-cost="${effectiveCost}" data-name="${s.name}"
+                  ${nd < effectiveCost ? 'disabled' : ''}>Use (${effectiveCost} die)</button>` : ''}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>`;
+
+  // Signature Move — checkboxes instead of dropdown
+  if (char.level >= 7) {
+    html += `
+      <div class="card">
+        <div class="card-title">Signature move</div>
+        <p style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.75rem;">
+          Your signature move costs 1 fewer Nerve Die (minimum 0). You can change it on a long rest.
+        </p>
+        <div style="display:flex; flex-direction:column; gap:0.4rem;">
+          ${known.map(id => {
+            const s = allShots.find(x => x.id === id);
+            if (!s) return '';
+            const isSig = sig === s.id;
+            return `
+              <label style="display:flex; gap:0.75rem; align-items:center; padding:0.5rem 0.75rem;
+                border:1px solid ${isSig ? 'var(--green)' : 'var(--border)'};
+                border-radius:var(--radius); background:${isSig ? 'rgba(74,222,128,0.08)' : 'var(--bg-raised)'};
+                cursor:pointer;">
+                <input type="radio" name="sig-radio" value="${s.id}" ${isSig ? 'checked' : ''} />
+                <div style="flex:1;">
+                  <div style="font-weight:500;">${s.name}</div>
+                  <div style="font-size:0.8rem; color:var(--text-dim);">${s.cost} die → ${Math.max(0, s.cost - 1)} die as signature</div>
+                </div>
+                ${isSig ? '<span style="font-size:0.75rem; color:var(--green); font-family:var(--font-display);">ACTIVE</span>' : ''}
+              </label>
+            `;
+          }).join('')}
+          <label style="display:flex; gap:0.75rem; align-items:center; padding:0.5rem 0.75rem;
+            border:1px solid ${!sig ? 'var(--text-muted)' : 'var(--border)'};
+            border-radius:var(--radius); background:var(--bg-raised); cursor:pointer;">
+            <input type="radio" name="sig-radio" value="" ${!sig ? 'checked' : ''} />
+            <div style="color:var(--text-dim); font-size:0.9rem;">— None —</div>
+          </label>
+        </div>
+      </div>`;
+  }
+
+  tc.innerHTML = html;
+
+  // Trick shot selection checkboxes
+  tc.querySelectorAll('.ts-select').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id = cb.dataset.id;
+      mutate(() => {
+        if (cb.checked) {
+          if ((data.selectedTrickShots || []).length < totalAllowed) {
+            data.selectedTrickShots = [...(data.selectedTrickShots || []), id];
+          } else {
+            cb.checked = false;
+          }
+        } else {
+          data.selectedTrickShots = (data.selectedTrickShots || []).filter(s => s !== id);
+          if (data.signatureMove === id) data.signatureMove = null;
+        }
+      });
+    });
+  });
+
+  // Signature move radio
+  tc.querySelectorAll('input[name="sig-radio"]').forEach(r => {
+    r.addEventListener('change', e => {
+      mutate(() => { data.signatureMove = e.target.value || null; });
+    });
+  });
+
+  // Use buttons (same logic as combat tab trick shots)
+  const ndData = getNerveDice(char.level);
+  tc.querySelectorAll('.trick-use').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cost = parseInt(btn.dataset.cost);
+      const name = btn.dataset.name;
+      mutate(() => { data.nerveDiceCurrent = Math.max(0, (data.nerveDiceCurrent ?? 0) - cost); });
+      let total = 0;
+      const rolls = [];
+      for (let i = 0; i < cost; i++) { const r = rollDie(ndData.dieSize); rolls.push(r); total += r; }
+      if (cost > 0) sendRollToDnDBeyond(`Trick shot: ${name}`, total, `${cost}d${ndData.dieSize} (${rolls.join('+')})`, char.name);
+      else showMsg(`${name} used — free this turn (Signature Move).`);
+    });
+  });
+}
+
 // ── NOTES TAB ────────────────────────────────────────────────────────────────
 function renderNotesTab(tc) {
   tc.innerHTML = `
@@ -1260,6 +1577,27 @@ function renderAdminTab(tc) {
       <button class="btn btn-gold" id="admin-save">Apply changes</button>
     </div>
     <div class="card" style="margin-top:1rem;">
+      <div class="card-title">Proficiencies</div>
+      <p style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.75rem;">Edit armor, weapon, tool, and other proficiencies shown on the Core tab. Leave blank to use the class defaults.</p>
+      <div class="form-group">
+        <label>Armor proficiencies</label>
+        <input class="form-input" id="admin-prof-armor" value="${(data.proficiencies||{}).armor || ''}" placeholder="Light armor, Medium armor, Shields" />
+      </div>
+      <div class="form-group">
+        <label>Weapon proficiencies</label>
+        <input class="form-input" id="admin-prof-weapons" value="${(data.proficiencies||{}).weapons || ''}" placeholder="Simple weapons, Firearms, Hand crossbows, Shortswords" />
+      </div>
+      <div class="form-group">
+        <label>Tool proficiencies</label>
+        <input class="form-input" id="admin-prof-tools" value="${(data.proficiencies||{}).tools || ''}" placeholder="e.g. Thieves' tools, Herbalism kit" />
+      </div>
+      <div class="form-group">
+        <label>Other proficiencies / notes</label>
+        <input class="form-input" id="admin-prof-other" value="${(data.proficiencies||{}).other || ''}" placeholder="e.g. Vehicles (land)" />
+      </div>
+      <button class="btn btn-gold" id="admin-prof-save">Save proficiencies</button>
+    </div>
+    <div class="card" style="margin-top:1rem;">
       <div class="card-title">Add feat to character</div>
       ${renderAddFeatSection()}
     </div>
@@ -1277,6 +1615,19 @@ function renderAdminTab(tc) {
     });
     await saveCharacter({ ...char, data }, userId);
     showMsg('Changes saved.');
+  });
+
+  document.getElementById('admin-prof-save')?.addEventListener('click', async () => {
+    mutate(() => {
+      data.proficiencies = {
+        armor:   document.getElementById('admin-prof-armor')?.value.trim() || null,
+        weapons: document.getElementById('admin-prof-weapons')?.value.trim() || null,
+        tools:   document.getElementById('admin-prof-tools')?.value.trim() || null,
+        other:   document.getElementById('admin-prof-other')?.value.trim() || null,
+      };
+    });
+    await saveCharacter({ ...char, data }, userId);
+    showMsg('Proficiencies saved.');
   });
 
   wireAddFeat(tc);
