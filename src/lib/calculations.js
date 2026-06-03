@@ -32,13 +32,23 @@ export function deriveStats(character) {
     charisma:     abilityMod(abilities.charisma),
   };
 
+  // Aggregate feat/effect bonuses stored on data
+  const featAcBonus       = character.featAcBonus       || 0;
+  const featInitBonus     = character.featInitBonus     || 0;
+  const featSpeedBonus    = character.featSpeedBonus    || 0;
+  const damageResistances = character.damageResistances || [];
+  const conditionImmunities = character.conditionImmunities || [];
+
+  // Also fold in skill expertise granted by feats (in addition to class expertises)
+  const allExpertises = [...(expertises || []), ...(character.featExpertise || [])];
+
   // Initiative: Outlaw adds Int mod (min +1) via Gunfighter's Instinct
   let initiativeBonus = mods.dexterity;
   if (classId === 'outlaw' && level >= 1) {
     const intBonus = Math.max(1, mods.intelligence);
     initiativeBonus = mods.dexterity + intBonus;
   }
-  initiativeBonus += (customBonuses.initiative || 0);
+  initiativeBonus += (customBonuses.initiative || 0) + featInitBonus;
 
   // AC calculation based on equipped armor
   let ac = 10 + mods.dexterity; // unarmored
@@ -55,7 +65,7 @@ export function deriveStats(character) {
     }
   }
   if (equippedShield) ac += 2;
-  ac += (customBonuses.ac || 0);
+  ac += (customBonuses.ac || 0) + featAcBonus;
 
   // Saving throws
   const saves = {};
@@ -77,7 +87,7 @@ export function deriveStats(character) {
   const skills = {};
   for (const [skill, ability] of Object.entries(SKILL_ABILITY)) {
     const isProficient = skillProficiencies.includes(skill);
-    const isExpert = expertises.includes(skill);
+    const isExpert = allExpertises.includes(skill);
     const multiplier = isExpert ? 2 : isProficient ? 1 : 0;
     skills[skill] = mods[ability] + multiplier * prof + (customBonuses[`skill_${skill}`] || 0);
   }
@@ -126,10 +136,14 @@ export function deriveStats(character) {
     recklessFusillade = { max: prof };
   }
 
+  // Speed — base 30, modified by feats
+  const speed = 30 + featSpeedBonus + (customBonuses.speed || 0);
+
   return {
     prof, mods, initiativeBonus, ac, saves, skills,
     passivePerception, spellSaveDC, spellAttackBonus,
     trickShotDC, calledShotDC, suppressingFireDC, showstopperDC, nerveDice, recklessFusillade,
+    speed, damageResistances, conditionImmunities,
   };
 }
 
@@ -185,9 +199,9 @@ export function getMisfireScore(weapon, character) {
 
 // Max HP calculation
 export function maxHP(character) {
-  const { level, abilities, hitDieOverride, manualHP } = character;
+  const { level, abilities, hitDieOverride, manualHP, classHitDie } = character;
   if (manualHP) return manualHP;
-  const hitDie = hitDieOverride || 10; // Outlaw default
+  const hitDie = hitDieOverride || classHitDie || 10; // default d10
   const conMod = abilityMod(abilities.constitution);
   // First level: max + con mod. Each subsequent: average (round up) + con mod
   const avg = Math.ceil(hitDie / 2) + 1;
