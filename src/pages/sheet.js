@@ -40,15 +40,41 @@ function buildCharacterForCalc() {
     abilities: data.abilities,
     classId: char.class_id,
     archetypeId: data.archetypeId,
-    skillProficiencies: data.skillProficiencies || [],
+    classHitDie: getClassHitDie(char.class_id),
+    skillProficiencies: getEffectiveSkillProficiencies(),
     expertises: data.expertises || [],
+    featExpertise: data.skillExpertise || [],
     saveProficiencies: data.saveProficiencies || [],
     equippedArmor: armorItem || null,
     equippedShield: shieldItem || null,
     feats: data.feats || [],
     speciesTraits: data.speciesTraits || [],
     customBonuses: data.customBonuses || {},
+    featAcBonus: data.acBonus || 0,
+    featInitBonus: data.initBonus || 0,
+    featSpeedBonus: data.speedBonus || 0,
+    damageResistances: data.damageResistances || [],
+    conditionImmunities: data.conditionImmunities || [],
   };
+}
+
+// Returns the hit die size for a given class ID — extend as classes are added
+function getClassHitDie(classId) {
+  const hitDice = { outlaw: 10 };
+  return hitDice[classId] || 10;
+}
+
+// Merge base skill proficiencies with any granted by homebrew backgrounds
+function getEffectiveSkillProficiencies() {
+  const base = data.skillProficiencies || [];
+  const bgEntry = homebrew.find(h =>
+    h.type === 'background' && (`hb_${h.id}` === data.backgroundId || h.id === data.backgroundId)
+  );
+  if (!bgEntry?.data?.skillProficiencies?.length) return base;
+  // Convert display-format skill names to camelCase keys
+  const toCamel = s => s.trim().toLowerCase().replace(/\s+(.)/g, (_, c) => c.toUpperCase());
+  const bgSkills = bgEntry.data.skillProficiencies.map(toCamel);
+  return [...new Set([...base, ...bgSkills])];
 }
 
 export async function renderSheet(container, characterId, uid, dm, navigate) {
@@ -109,6 +135,9 @@ function renderSheetUI() {
           <span class="badge">Prof +${derived.prof}</span>
           <span class="badge">Initiative ${formatMod(derived.initiativeBonus)}</span>
           <span class="badge">AC ${derived.ac}</span>
+          <span class="badge">Speed ${derived.speed} ft</span>
+          ${derived.damageResistances?.length ? `<span class="badge badge-gold">Resist: ${derived.damageResistances.join(', ')}</span>` : ''}
+          ${derived.conditionImmunities?.length ? `<span class="badge">Immune: ${derived.conditionImmunities.join(', ')}</span>` : ''}
           ${derived.trickShotDC ? `<span class="badge badge-gold">Trick Shot DC ${derived.trickShotDC}</span>` : ''}
           ${derived.spellSaveDC ? `<span class="badge badge-gold">Spell DC ${derived.spellSaveDC}</span>` : ''}
         </div>
@@ -135,7 +164,7 @@ function renderSheetUI() {
             <button class="btn btn-sm" id="hp-dmg">Damage</button>
             <button class="btn btn-sm btn-gold" id="hp-heal">Heal</button>
             <button class="btn btn-sm" id="hp-temp">Set temp HP</button>
-            <button class="btn btn-sm" id="hp-hitdie">Hit die (d${OUTLAW.hitDie || 10})</button>
+            <button class="btn btn-sm" id="hp-hitdie">Short rest</button>
           </div>
         </div>
         <div>
@@ -205,10 +234,7 @@ function renderSheetUI() {
     if (!isNaN(amt)) mutate(() => { data.tempHP = amt; });
   });
   document.getElementById('hp-hitdie')?.addEventListener('click', () => {
-    const roll = rollDie(10) + derived.mods.constitution;
-    const gained = Math.max(1, roll);
-    mutate(() => { data.currentHP = Math.min(mhp, (data.currentHP ?? mhp) + gained); });
-    sendRollToDnDBeyond('Hit die', gained, `1d10 + Con (${formatMod(derived.mods.constitution)})`, char.name);
+    showShortRestModal();
   });
 
   // Death saves
@@ -700,13 +726,18 @@ function renderNerveTab(tc) {
   document.getElementById('long-rest')?.addEventListener('click', () => {
     mutate(() => {
       data.nerveDiceCurrent = nd.count;
-      data.currentHP = data.maxHPOverride || maxHP({ level: char.level, abilities: data.abilities, classId: char.class_id });
+      data.currentHP = data.maxHPOverride || maxHP({ level: char.level, abilities: data.abilities, classId: char.class_id, classHitDie: getClassHitDie(char.class_id) });
       data.spellSlotsUsed = {};
       data.deathSaves = { successes: 0, failures: 0 };
+      // Restore half the character's hit dice (rounded up), per official rules
+      const maxDice = char.level;
+      const used = data.hitDiceUsed || 0;
+      const restored = Math.min(used, Math.max(1, Math.ceil(maxDice / 2)));
+      data.hitDiceUsed = Math.max(0, used - restored);
       if (data.recklessFusillade) data.recklessFusillade.used = 0;
       if (data.legendaryDuel) data.legendaryDuel.used = false;
     });
-    showMsg('Long rest complete. HP, Nerve Dice, and spell slots restored.');
+    showMsg('Long rest complete. HP, Nerve Dice, spell slots, and hit dice restored.');
   });
 
   tc.querySelectorAll('.nd-spend').forEach(btn => {
@@ -1021,27 +1052,42 @@ function renderInventoryTab(tc) {
         ? '<div style="color:var(--text-muted); font-size:0.9rem; padding:0.5rem 0;">No items. Add items using the buttons above.</div>'
         : inv.map(item => renderInvRow(item)).join('')
       }
-      <div class="currency-row">
-        <div class="currency-item">
-          <div class="currency-val"><input type="number" class="form-input" id="cur-gp" value="${data.currency?.gp||0}" style="width:60px; text-align:center;" /></div>
-          <div class="currency-label">GP</div>
+      <div style="margin-top:1rem;">
+        <div class="card-title" style="margin-bottom:0.5rem;">Currency</div>
+        <div class="currency-row" style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:flex-end;">
+          ${[
+            { id:'pp', label:'PP', color:'#b0c4de' },
+            { id:'gp', label:'GP', color:'var(--gold)' },
+            { id:'ep', label:'EP', color:'#a8d8a8' },
+            { id:'sp', label:'SP', color:'#c0c0c0' },
+            { id:'cp', label:'CP', color:'#b87333' },
+          ].map(c => `
+            <div class="currency-item" style="text-align:center;">
+              <div class="currency-val">
+                <input type="number" class="form-input currency-input" data-coin="${c.id}"
+                  value="${data.currency?.[c.id]||0}"
+                  style="width:65px; text-align:center; border-bottom:2px solid ${c.color};" min="0" />
+              </div>
+              <div class="currency-label" style="font-size:0.75rem; color:${c.color}; font-family:var(--font-display); letter-spacing:0.05em; margin-top:0.25rem;">${c.label}</div>
+            </div>
+          `).join('')}
         </div>
-        <div class="currency-item">
-          <div class="currency-val"><input type="number" class="form-input" id="cur-sp" value="${data.currency?.sp||0}" style="width:60px; text-align:center;" /></div>
-          <div class="currency-label">SP</div>
-        </div>
-        <div class="currency-item">
-          <div class="currency-val"><input type="number" class="form-input" id="cur-cp" value="${data.currency?.cp||0}" style="width:60px; text-align:center;" /></div>
-          <div class="currency-label">CP</div>
+        <div style="margin-top:0.6rem; font-size:0.78rem; color:var(--text-muted); display:flex; gap:1rem; flex-wrap:wrap;">
+          <span>1 PP = 10 GP</span>
+          <span>1 GP = 10 SP</span>
+          <span>1 EP = 5 SP</span>
+          <span>1 SP = 10 CP</span>
+          <span style="color:var(--text-dim);">1 PP = 100 SP = 1000 CP</span>
         </div>
       </div>
     </div>
   `;
 
-  // Currency
-  ['gp','sp','cp'].forEach(c => {
-    document.getElementById(`cur-${c}`)?.addEventListener('change', e => {
-      mutate(() => { data.currency = { ...(data.currency||{}), [c]: parseInt(e.target.value)||0 }; });
+  // Currency inputs
+  tc.querySelectorAll('.currency-input').forEach(input => {
+    input.addEventListener('change', e => {
+      const coin = e.target.dataset.coin;
+      mutate(() => { data.currency = { ...(data.currency||{}), [coin]: parseInt(e.target.value)||0 }; });
     });
   });
 
@@ -1437,7 +1483,7 @@ function renderTrickShotsTab(tc) {
         ${allShots.map(s => {
           const isKnown = known.includes(s.id);
           const isSig = sig === s.id;
-          const effectiveCost = isSig ? Math.max(0, s.cost - 1) : s.cost;
+          const effectiveCost = isSig ? Math.max(1, s.cost - 1) : s.cost;
           const canSelect = isKnown || known.length < totalAllowed;
           return `
             <div style="border:1px solid ${isKnown ? 'var(--gold-dim)' : 'var(--border)'}; border-radius:var(--radius); padding:0.6rem 0.75rem; background:${isKnown ? 'var(--gold-glow)' : 'var(--bg-raised)'};">
@@ -1456,7 +1502,7 @@ function renderTrickShotsTab(tc) {
                 </div>
                 ${isKnown ? `<button class="btn btn-sm trick-use ${nd < effectiveCost ? '' : 'btn-gold'}"
                   data-cost="${effectiveCost}" data-name="${s.name}"
-                  ${nd < effectiveCost ? 'disabled' : ''}>Use (${effectiveCost} die)</button>` : ''}
+                  ${nd < effectiveCost ? 'disabled' : ''}>Use (${effectiveCost} ${effectiveCost === 1 ? 'die' : 'dice'})</button>` : ''}
               </div>
             </div>
           `;
@@ -1470,7 +1516,7 @@ function renderTrickShotsTab(tc) {
       <div class="card">
         <div class="card-title">Signature move</div>
         <p style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.75rem;">
-          Your signature move costs 1 fewer Nerve Die (minimum 0). You can change it on a long rest.
+          Your signature move costs 1 fewer Nerve Die per use (minimum 1). It still costs at least 1 die. You may change it on a long rest.
         </p>
         <div style="display:flex; flex-direction:column; gap:0.4rem;">
           ${known.map(id => {
@@ -1485,7 +1531,7 @@ function renderTrickShotsTab(tc) {
                 <input type="radio" name="sig-radio" value="${s.id}" ${isSig ? 'checked' : ''} />
                 <div style="flex:1;">
                   <div style="font-weight:500;">${s.name}</div>
-                  <div style="font-size:0.8rem; color:var(--text-dim);">${s.cost} die → ${Math.max(0, s.cost - 1)} die as signature</div>
+                  <div style="font-size:0.8rem; color:var(--text-dim);">${s.cost} die → ${Math.max(1, s.cost - 1)} die as signature (min 1)</div>
                 </div>
                 ${isSig ? '<span style="font-size:0.75rem; color:var(--green); font-family:var(--font-display);">ACTIVE</span>' : ''}
               </label>
@@ -1728,6 +1774,99 @@ function wireAddFeat(tc) {
       applyFeatEffects(effects, resolvedChoices);
     });
     showMsg(`${feat.name} added.`);
+  });
+}
+
+// ── Short rest modal ─────────────────────────────────────────────────────────
+function showShortRestModal() {
+  const hitDie = getClassHitDie(char.class_id);
+  const maxDice = char.level;
+  const usedDice = data.hitDiceUsed || 0;
+  const availableDice = Math.max(0, maxDice - usedDice);
+  const mhp = data.maxHPOverride || maxHP({ level: char.level, abilities: data.abilities, classId: char.class_id, classHitDie: hitDie });
+  const currentHP = data.currentHP ?? mhp;
+  const missingHP = mhp - currentHP;
+  const ndRecovery = shortRestNerveDiceRecovery({ level: char.level, classId: char.class_id });
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Short rest</div>
+      <div style="font-size:0.9rem; color:var(--text-dim); margin-bottom:1rem;">
+        <div>Available hit dice: <strong style="color:var(--text)">${availableDice} / ${maxDice}</strong> (d${hitDie} + Con ${formatMod(derived.mods.constitution)} each)</div>
+        <div>Current HP: <strong style="color:var(--text)">${currentHP} / ${mhp}</strong> (missing ${missingHP})</div>
+        ${ndRecovery > 0 ? `<div>Nerve Dice recovered: <strong style="color:var(--gold)">${ndRecovery}</strong></div>` : ''}
+      </div>
+      ${availableDice === 0 ? `
+        <div style="padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius); color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">
+          No hit dice remaining. They are restored on a long rest.
+        </div>` : `
+        <div style="margin-bottom:1rem;">
+          <label style="font-size:0.9rem; color:var(--text-dim);">How many hit dice to spend?</label>
+          <div style="display:flex; align-items:center; gap:0.75rem; margin-top:0.5rem;">
+            <button class="btn btn-sm" id="sr-dec">−</button>
+            <span id="sr-count" style="font-family:var(--font-display); font-size:1.4rem; min-width:2ch; text-align:center;">1</span>
+            <button class="btn btn-sm" id="sr-inc">+</button>
+            <span style="font-size:0.85rem; color:var(--text-muted);">max ${availableDice}</span>
+          </div>
+        </div>`}
+      <div class="modal-footer">
+        <button class="btn" id="sr-cancel">Cancel</button>
+        ${availableDice > 0 ? `<button class="btn btn-gold" id="sr-confirm">Roll & rest</button>` : `<button class="btn btn-gold" id="sr-confirm-nd">Take rest${ndRecovery > 0 ? ' (recover Nerve Dice)' : ''}</button>`}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  let diceToSpend = 1;
+  const countEl = overlay.querySelector('#sr-count');
+
+  overlay.querySelector('#sr-dec')?.addEventListener('click', () => {
+    diceToSpend = Math.max(1, diceToSpend - 1);
+    if (countEl) countEl.textContent = diceToSpend;
+  });
+  overlay.querySelector('#sr-inc')?.addEventListener('click', () => {
+    diceToSpend = Math.min(availableDice, diceToSpend + 1);
+    if (countEl) countEl.textContent = diceToSpend;
+  });
+  overlay.querySelector('#sr-cancel')?.addEventListener('click', () => overlay.remove());
+
+  overlay.querySelector('#sr-confirm')?.addEventListener('click', () => {
+    let totalHealed = 0;
+    const rolls = [];
+    for (let i = 0; i < diceToSpend; i++) {
+      const r = rollDie(hitDie);
+      const healed = Math.max(1, r + derived.mods.constitution);
+      rolls.push(`${r}+${derived.mods.constitution >= 0 ? derived.mods.constitution : '('+derived.mods.constitution+')'}`);
+      totalHealed += healed;
+    }
+    const newHP = Math.min(mhp, currentHP + totalHealed);
+    mutate(() => {
+      data.currentHP = newHP;
+      data.hitDiceUsed = (data.hitDiceUsed || 0) + diceToSpend;
+      if (ndRecovery > 0) {
+        data.nerveDiceCurrent = Math.min(data.nerveDiceMax || char.level, (data.nerveDiceCurrent || 0) + ndRecovery);
+      }
+    });
+    sendRollToDnDBeyond(
+      `Short rest (${diceToSpend}d${hitDie})`,
+      totalHealed,
+      `${diceToSpend}d${hitDie} + Con [${rolls.join(', ')}] = ${totalHealed} HP`,
+      char.name
+    );
+    showMsg(`Short rest: spent ${diceToSpend} hit ${diceToSpend === 1 ? 'die' : 'dice'}, healed ${totalHealed} HP.`);
+    overlay.remove();
+  });
+
+  overlay.querySelector('#sr-confirm-nd')?.addEventListener('click', () => {
+    mutate(() => {
+      if (ndRecovery > 0) {
+        data.nerveDiceCurrent = Math.min(data.nerveDiceMax || char.level, (data.nerveDiceCurrent || 0) + ndRecovery);
+      }
+    });
+    showMsg('Short rest complete.' + (ndRecovery > 0 ? ` Recovered ${ndRecovery} Nerve Dice.` : ''));
+    overlay.remove();
   });
 }
 
