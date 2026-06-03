@@ -863,24 +863,26 @@ function renderFeaturesTab(tc) {
 
   // Rune tracker for Arcane Artillerist
   if (data.archetypeId === 'arcane-artillerist' && char.level >= 7) {
+    const dc = derived.spellSaveDC;
+    const lvl15 = char.level >= 15;
     const runeDescs = {
       'None':  'No rune inscribed.',
-      'Flare': `+1d6 fire damage, bypasses fire resistance. ${char.level >= 15 ? `Arcane Overload: Con save DC ${derived.spellSaveDC} or blinded until end of next turn.` : ''}`,
-      'Force': `Bypasses physical resistance, pushes 5ft on hit. ${char.level >= 15 ? `Arcane Overload: Str save DC ${derived.spellSaveDC} or knocked prone and pushed 10ft.` : ''}`,
-      'Storm': `+1d6 lightning damage. Con save DC ${derived.spellSaveDC} or lose reaction until start of next turn. ${char.level >= 15 ? `Arcane Overload: Con save DC ${derived.spellSaveDC} or lose concentration and can't cast concentration spells until end of next turn.` : ''}`,
-      'Void':  `Deals necrotic instead of piercing. On crit: prevents HP regain until start of your next turn. ${char.level >= 15 ? `Arcane Overload: Con save DC ${derived.spellSaveDC} or gain one exhaustion level.` : ''}`,
+      'Flare': '+1d6 fire damage, bypasses fire resistance.' + (lvl15 ? ' Arcane Overload: Con save DC ' + dc + ' or blinded until end of next turn.' : ''),
+      'Force': 'Bypasses physical resistance, pushes 5ft on hit.' + (lvl15 ? ' Arcane Overload: Str save DC ' + dc + ' or knocked prone and pushed 10ft.' : ''),
+      'Storm': '+1d6 lightning damage. Con save DC ' + dc + ' or lose reaction until start of next turn.' + (lvl15 ? ' Arcane Overload: Con save DC ' + dc + ' or lose concentration and cannot cast concentration spells until end of next turn.' : ''),
+      'Void':  'Deals necrotic instead of piercing. On crit: prevents HP regain until start of your next turn.' + (lvl15 ? ' Arcane Overload: Con save DC ' + dc + ' or gain one exhaustion level.' : ''),
     };
     const activeRune = data.runeActive || 'None';
-    html += \`<div class="card" style="margin-bottom:1rem;">
-      <div class="card-title">Runic barrel · Save DC \${derived.spellSaveDC}</div>
+    html += `<div class="card" style="margin-bottom:1rem;">
+      <div class="card-title">Runic barrel · Save DC ${derived.spellSaveDC}</div>
       <div class="form-group">
         <label>Active rune</label>
         <select class="form-select" id="rune-picker">
-          \${['None','Flare','Force','Storm','Void'].map(r => \`<option value="\${r}" \${activeRune===r?'selected':''}>\${r}</option>\`).join('')}
+          ${['None','Flare','Force','Storm','Void'].map(r => `<option value="${r}" ${activeRune===r?'selected':''}>${r}</option>`).join('')}
         </select>
       </div>
-      <div style="font-size:0.85rem; color:var(--text-dim); margin-top:0.4rem;">\${runeDescs[activeRune]}</div>
-    </div>\`;
+      <div style="font-size:0.85rem; color:var(--text-dim); margin-top:0.4rem;">${runeDescs[activeRune]}</div>
+    </div>`;
   }
 
   // ALL upcoming features (no slice limit)
