@@ -287,6 +287,32 @@ export const OUTLAW = {
       name: 'Desperado',
       level: 3,
       spellcasting: null,
+      nerveDiceOptions: [
+        {
+          id: 'into-the-fray',
+          name: 'Into the fray',
+          cost: 1,
+          action: 'reaction',
+          description: 'When a creature within 5 feet misses you with a melee attack, make one firearm attack against it.',
+          levelRequired: 7,
+        },
+        {
+          id: 'unbreakable',
+          name: 'Unbreakable',
+          cost: 2,
+          action: 'reaction',
+          description: 'When you fail a save against being stunned, paralyzed, or incapacitated, spend 2 Nerve Dice to succeed instead. Once per round.',
+          levelRequired: 10,
+        },
+        {
+          id: 'no-mercy',
+          name: 'No mercy',
+          cost: 1,
+          action: 'free (on kill)',
+          description: 'When you reduce a creature to 0 HP with a firearm attack, make one additional firearm attack against a different creature within range as part of the same action.',
+          levelRequired: 15,
+        },
+      ],
       features: {
         'reckless-fusillade': {
           id: 'reckless-fusillade',
