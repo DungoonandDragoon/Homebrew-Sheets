@@ -105,6 +105,14 @@ export function deriveStats(character) {
     calledShotDC = 8 + prof + mods.dexterity;
   }
 
+  // Runic barrel / arcane overload save DC (Con-based for arcane artillerist)
+  // Uses spell save DC (Int-based) — same as spellSaveDC
+  // Suppressing fire DC (Dex-based) — same as trickShotDC formula
+  const suppressingFireDC = 8 + prof + mods.dexterity;
+  // Showstopper DC (Gunslinger level 15) — same as trickShotDC
+  const showstopperDC = trickShotDC;
+  // Unbreakable / Into the fray don't need a DC — they're reaction spends
+
   // Nerve dice info
   let nerveDice = null;
   if (classId === 'outlaw' && level >= 2) {
@@ -121,7 +129,7 @@ export function deriveStats(character) {
   return {
     prof, mods, initiativeBonus, ac, saves, skills,
     passivePerception, spellSaveDC, spellAttackBonus,
-    trickShotDC, calledShotDC, nerveDice, recklessFusillade,
+    trickShotDC, calledShotDC, suppressingFireDC, showstopperDC, nerveDice, recklessFusillade,
   };
 }
 
