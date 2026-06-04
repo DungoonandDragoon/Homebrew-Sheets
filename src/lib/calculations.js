@@ -121,7 +121,18 @@ export function deriveStats(character) {
   const suppressingFireDC = 8 + prof + mods.dexterity;
   // Showstopper DC (Gunslinger level 15) — same as trickShotDC
   const showstopperDC = trickShotDC;
-  // Unbreakable / Into the fray don't need a DC — they're reaction spends
+
+  // Mutator DCs — Constitution + proficiency based
+  let mutationSaveDC = null;
+  let mutatorSpellSaveDC = null;
+  let mutatorSpellAttackBonus = null;
+  if (classId === 'mutator') {
+    mutationSaveDC = 8 + prof + mods.constitution;
+    if (archetypeId === 'arcanist' && level >= 3) {
+      mutatorSpellSaveDC      = 8 + prof + mods.intelligence;
+      mutatorSpellAttackBonus = prof + mods.intelligence;
+    }
+  }
 
   // Nerve dice info
   let nerveDice = null;
@@ -144,6 +155,7 @@ export function deriveStats(character) {
     passivePerception, spellSaveDC, spellAttackBonus,
     trickShotDC, calledShotDC, suppressingFireDC, showstopperDC, nerveDice, recklessFusillade,
     speed, damageResistances, conditionImmunities,
+    mutationSaveDC, mutatorSpellSaveDC, mutatorSpellAttackBonus,
   };
 }
 
