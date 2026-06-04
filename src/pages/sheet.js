@@ -2,6 +2,7 @@ import { getCharacter, saveCharacter, getAllHomebrew } from '../lib/db.js';
 import { deriveStats, maxHP, getMisfireScore, weaponAttack, shortRestNerveDiceRecovery,
          SKILL_LABELS, SKILL_ABILITY_LABELS, ABILITY_LABELS, CONDITIONS, formatMod } from '../lib/calculations.js';
 import { OUTLAW, getProgression, getUnlockedFeatures, getNerveDice } from '../lib/classes/outlaw.js';
+import { MUTATOR, getMutatorProgression, getMutatorUnlockedFeatures, getAvailableMutations, getMutatorSpellSlots, getMaxActiveMutations } from '../lib/classes/mutator.js';
 import { WIZARD_SPELLS } from '../lib/spells.js';
 import { sendRollToDnDBeyond, rollDie, rollDice } from '../app.js';
 
@@ -60,7 +61,7 @@ function buildCharacterForCalc() {
 
 // Returns the hit die size for a given class ID — extend as classes are added
 function getClassHitDie(classId) {
-  const hitDice = { outlaw: 10 };
+  const hitDice = { outlaw: 10, mutator: 10 };
   return hitDice[classId] || 10;
 }
 
@@ -121,6 +122,8 @@ function renderSheetUI() {
     { id:'inventory',label:'Inventory' },
     ...(data.archetypeId === 'arcane-artillerist' ? [{ id:'spells', label:'Spells' }] : []),
     ...(data.archetypeId === 'gunslinger' && char.level >= 3 ? [{ id:'trickshots', label:'Trick Shots' }] : []),
+    ...(char.class_id === 'mutator' ? [{ id:'mutations', label:'Mutations' }] : []),
+    ...(char.class_id === 'mutator' && data.evolutionId === 'arcanist' && char.level >= 3 ? [{ id:'mutator-spells', label:'Spells' }] : []),
     { id:'notes',    label:'Notes' },
     ...(isDM ? [{ id:'admin', label:'Admin (DM)' }] : []),
   ];
@@ -139,6 +142,8 @@ function renderSheetUI() {
           ${derived.damageResistances?.length ? `<span class="badge badge-gold">Resist: ${derived.damageResistances.join(', ')}</span>` : ''}
           ${derived.conditionImmunities?.length ? `<span class="badge">Immune: ${derived.conditionImmunities.join(', ')}</span>` : ''}
           ${derived.trickShotDC ? `<span class="badge badge-gold">Trick Shot DC ${derived.trickShotDC}</span>` : ''}
+          ${derived.mutationSaveDC ? `<span class="badge badge-gold">Mutation DC ${derived.mutationSaveDC}</span>` : ''}
+          ${derived.mutatorSpellSaveDC ? `<span class="badge badge-gold">Spell DC ${derived.mutatorSpellSaveDC}</span>` : ''}
           ${derived.spellSaveDC ? `<span class="badge badge-gold">Spell DC ${derived.spellSaveDC}</span>` : ''}
         </div>
       </div>
@@ -253,6 +258,14 @@ function renderSheetUI() {
       data.hitDiceUsed = Math.max(0, used - restored);
       if (data.recklessFusillade) data.recklessFusillade.used = 0;
       if (data.legendaryDuel) data.legendaryDuel.used = false;
+      // Mutator: bioshocks and spell slots reset on long rest; active mutations drop
+      if (char.class_id === 'mutator') {
+        data.bioshocksUsed = 0;
+        data.bioshockedMutations = [];
+        data.activeMutations = [];
+        data.biomassUsed = 0;
+        data.mutatorSpellSlotsUsed = {};
+      }
     });
     showMsg('Long rest complete. HP, Nerve Dice, spell slots, and hit dice restored.');
   });
@@ -296,6 +309,8 @@ function renderSheetUI() {
   else if (activeTab === 'inventory') renderInventoryTab(tc);
   else if (activeTab === 'spells') renderSpellsTab(tc);
   else if (activeTab === 'trickshots') renderTrickShotsTab(tc);
+  else if (activeTab === 'mutations') renderMutationsTab(tc);
+  else if (activeTab === 'mutator-spells') renderMutatorSpellsTab(tc);
   else if (activeTab === 'notes') renderNotesTab(tc);
   else if (activeTab === 'admin') renderAdminTab(tc);
 }
@@ -763,8 +778,10 @@ function renderNerveTab(tc) {
 // ── FEATURES TAB ──────────────────────────────────────────────────────────────
 function renderFeaturesTab(tc) {
   // 1. Class features sorted by level
-  const unlocked = getUnlockedFeatures(char.level, data.archetypeId)
-    .sort((a, b) => a.level - b.level);
+  const unlocked = (char.class_id === 'mutator'
+    ? getMutatorUnlockedFeatures(char.level, data.evolutionId)
+    : getUnlockedFeatures(char.level, data.archetypeId)
+  ).sort((a, b) => a.level - b.level);
 
   // 2. Species traits from homebrew species data
   const speciesEntry = homebrew.find(h => h.type === 'species' && (`hb_${h.id}` === data.speciesId || h.id === data.speciesId));
@@ -1587,6 +1604,256 @@ function renderTrickShotsTab(tc) {
   });
 }
 
+// ── MUTATIONS TAB (Mutator only) ─────────────────────────────────────────────
+function renderMutationsTab(tc) {
+  const prog = getMutatorProgression(char.level);
+  const biomass        = prog?.biomass || 1;
+  const bioshocks      = prog?.bioshocks || 0;
+  const mutationsKnown = prog?.mutationsKnown || 2;
+  const maxActive      = getMaxActiveMutations(char.level);
+
+  const biomassUsed    = data.biomassUsed    || 0;
+  const bioshocksUsed  = data.bioshocksUsed  || 0;
+  const knownMutations = data.knownMutations  || [];
+  const activeMuts     = data.activeMutations || [];
+  const bioshockedMuts = data.bioshockedMutations || [];
+
+  const biomassLeft   = Math.max(0, biomass - biomassUsed);
+  const bioshockLeft  = Math.max(0, bioshocks - bioshocksUsed);
+
+  const allAvailable   = getAvailableMutations(char.level, data.evolutionId);
+  const knownObjs      = knownMutations.map(id => allAvailable.find(m => m.id === id)).filter(Boolean);
+
+  let html = `
+    <!-- Resource pools -->
+    <div class="card" style="margin-bottom:1rem;">
+      <div style="display:flex; gap:2rem; flex-wrap:wrap; align-items:flex-start;">
+        <div>
+          <div class="card-title" style="margin-bottom:0.4rem;">Biomass</div>
+          <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+            ${Array.from({length: biomass}, (_, i) => `
+              <div class="nerve-die ${i >= biomassLeft ? 'spent' : ''} biomass-pip" data-i="${i}"
+                style="cursor:pointer;" title="${i < biomassLeft ? 'Click to spend' : 'Spent'}">
+                ${i < biomassLeft ? 'B' : '·'}
+              </div>`).join('')}
+          </div>
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.3rem;">${biomassLeft} / ${biomass} · Resets on short rest</div>
+        </div>
+        ${bioshocks > 0 ? `<div>
+          <div class="card-title" style="margin-bottom:0.4rem;">Bioshocks</div>
+          <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+            ${Array.from({length: bioshocks}, (_, i) => `
+              <div class="nerve-die ${i >= bioshockLeft ? 'spent' : ''} bioshock-pip" data-i="${i}"
+                style="cursor:pointer;">
+                ${i < bioshockLeft ? 'S' : '·'}
+              </div>`).join('')}
+          </div>
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.3rem;">${bioshockLeft} / ${bioshocks} · Resets on long rest</div>
+        </div>` : ''}
+        <div>
+          <div class="card-title" style="margin-bottom:0.4rem;">Active mutations</div>
+          <div style="font-size:1.1rem; font-family:var(--font-display);">${activeMuts.length} / ${maxActive}</div>
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.3rem;">Mutation DC: ${derived.mutationSaveDC || (8 + derived.prof + derived.mods.constitution)}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Known mutations -->
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="section-header">
+        <div class="card-title" style="margin:0;">Known mutations (${knownMutations.length} / ${mutationsKnown})</div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.5rem;">
+        ${allAvailable.map(m => {
+          const isKnown      = knownMutations.includes(m.id);
+          const isActive     = activeMuts.includes(m.id);
+          const isBioshocked = bioshockedMuts.includes(m.id);
+          const canLearn     = isKnown || knownMutations.length < mutationsKnown;
+          const canActivate  = isKnown && !isActive && biomassLeft > 0 && activeMuts.length < maxActive;
+          const canDeactivate= isActive;
+          const canBioshock  = isActive && !isBioshocked && bioshockLeft > 0;
+          const canUnbioshock= isBioshocked;
+
+          return `<div style="border:1px solid ${isActive ? 'var(--gold-dim)' : isKnown ? 'var(--border)' : 'var(--border)'};
+            border-radius:var(--radius); padding:0.6rem 0.75rem;
+            background:${isActive ? 'var(--gold-glow)' : isKnown ? 'var(--bg-raised)' : 'transparent'};">
+            <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+              <input type="checkbox" class="mut-learn" data-id="${m.id}" ${isKnown ? 'checked' : ''} ${!canLearn ? 'disabled' : ''} />
+              <div style="flex:1; min-width:0;">
+                <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                  <span style="font-weight:500;">${m.name}</span>
+                  ${m.prerequisite ? `<span style="font-size:0.72rem; color:var(--text-muted);">${m.prerequisite}</span>` : ''}
+                  ${isActive ? `<span style="font-size:0.72rem; color:var(--gold); font-family:var(--font-display); letter-spacing:0.06em;">ACTIVE</span>` : ''}
+                  ${isBioshocked ? `<span style="font-size:0.72rem; color:var(--blue,#60a5fa); font-family:var(--font-display); letter-spacing:0.06em;">BIOSHOCKED</span>` : ''}
+                </div>
+                <div style="font-size:0.82rem; color:var(--text-dim); margin-top:0.2rem;">${m.activation} · ${m.duration}</div>
+                <div style="font-size:0.82rem; color:var(--text); margin-top:0.2rem;">${isActive && isBioshocked ? m.bioshock || m.description : m.description}</div>
+                ${m.bioshock && !isBioshocked ? `<div style="font-size:0.8rem; color:var(--blue,#60a5fa); margin-top:0.2rem;"><strong>Bioshock:</strong> ${m.bioshock}</div>` : ''}
+              </div>
+              ${isKnown ? `<div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+                ${canActivate   ? `<button class="btn btn-sm btn-gold mut-activate"   data-id="${m.id}">Activate</button>` : ''}
+                ${canDeactivate ? `<button class="btn btn-sm mut-deactivate" data-id="${m.id}">Deactivate</button>` : ''}
+                ${canBioshock   ? `<button class="btn btn-sm mut-bioshock"   data-id="${m.id}" style="color:var(--blue,#60a5fa);">Bioshock</button>` : ''}
+                ${canUnbioshock ? `<button class="btn btn-sm mut-unbioshock" data-id="${m.id}">Remove bioshock</button>` : ''}
+              </div>` : ''}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- Short rest resets biomass -->
+    <div style="font-size:0.85rem; color:var(--text-muted); margin-top:0.5rem; text-align:center;">
+      Biomass resets on short rest · Bioshocks reset on long rest
+    </div>
+  `;
+
+  tc.innerHTML = html;
+
+  // Biomass pips — click to spend/restore
+  tc.querySelectorAll('.biomass-pip').forEach(pip => {
+    pip.addEventListener('click', () => {
+      const i = parseInt(pip.dataset.i);
+      const cur = biomass - (data.biomassUsed || 0);
+      mutate(() => {
+        if (i < cur) data.biomassUsed = (data.biomassUsed || 0) + 1;
+        else data.biomassUsed = Math.max(0, (data.biomassUsed || 0) - 1);
+      });
+    });
+  });
+
+  // Bioshock pips
+  tc.querySelectorAll('.bioshock-pip').forEach(pip => {
+    pip.addEventListener('click', () => {
+      const i = parseInt(pip.dataset.i);
+      const cur = bioshocks - (data.bioshocksUsed || 0);
+      mutate(() => {
+        if (i < cur) data.bioshocksUsed = (data.bioshocksUsed || 0) + 1;
+        else data.bioshocksUsed = Math.max(0, (data.bioshocksUsed || 0) - 1);
+      });
+    });
+  });
+
+  // Learn/forget mutations
+  tc.querySelectorAll('.mut-learn').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id = cb.dataset.id;
+      mutate(() => {
+        if (cb.checked) {
+          if ((data.knownMutations || []).length < mutationsKnown) {
+            data.knownMutations = [...(data.knownMutations || []), id];
+          } else { cb.checked = false; }
+        } else {
+          data.knownMutations = (data.knownMutations || []).filter(m => m !== id);
+          data.activeMutations = (data.activeMutations || []).filter(m => m !== id);
+          data.bioshockedMutations = (data.bioshockedMutations || []).filter(m => m !== id);
+        }
+      });
+    });
+  });
+
+  // Activate
+  tc.querySelectorAll('.mut-activate').forEach(btn => {
+    btn.addEventListener('click', () => {
+      mutate(() => {
+        data.activeMutations = [...(data.activeMutations || []), btn.dataset.id];
+        data.biomassUsed = (data.biomassUsed || 0) + 1;
+      });
+    });
+  });
+
+  // Deactivate
+  tc.querySelectorAll('.mut-deactivate').forEach(btn => {
+    btn.addEventListener('click', () => {
+      mutate(() => {
+        data.activeMutations = (data.activeMutations || []).filter(m => m !== btn.dataset.id);
+        data.bioshockedMutations = (data.bioshockedMutations || []).filter(m => m !== btn.dataset.id);
+      });
+    });
+  });
+
+  // Bioshock
+  tc.querySelectorAll('.mut-bioshock').forEach(btn => {
+    btn.addEventListener('click', () => {
+      mutate(() => {
+        data.bioshockedMutations = [...(data.bioshockedMutations || []), btn.dataset.id];
+        data.bioshocksUsed = (data.bioshocksUsed || 0) + 1;
+      });
+    });
+  });
+
+  // Remove bioshock
+  tc.querySelectorAll('.mut-unbioshock').forEach(btn => {
+    btn.addEventListener('click', () => {
+      mutate(() => {
+        data.bioshockedMutations = (data.bioshockedMutations || []).filter(m => m !== btn.dataset.id);
+        data.bioshocksUsed = Math.max(0, (data.bioshocksUsed || 0) - 1);
+      });
+    });
+  });
+}
+
+// ── MUTATOR SPELLS TAB (Arcanist evolution only) ───────────────────────────────
+function renderMutatorSpellsTab(tc) {
+  const slots = getMutatorSpellSlots(char.level, data.evolutionId);
+  if (!slots) { tc.innerHTML = '<div class="card">Spellcasting unlocks at Arcanist level 3.</div>'; return; }
+
+  const slotsUsed = data.mutatorSpellSlotsUsed || {};
+  const dc = derived.mutatorSpellSaveDC || (8 + derived.prof + derived.mods.intelligence);
+  const atk = derived.mutatorSpellAttackBonus || (derived.prof + derived.mods.intelligence);
+
+  tc.innerHTML = `
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="card-title">Arcanist spellcasting</div>
+      <div style="display:flex; gap:1.5rem; flex-wrap:wrap; font-size:0.9rem; margin-bottom:1rem;">
+        <div>Spell save DC <strong>${dc}</strong></div>
+        <div>Spell attack <strong>${formatMod(atk)}</strong></div>
+        <div>Cantrips known <strong>${slots.cantripsKnown}</strong></div>
+        <div>Spells known <strong>${slots.spellsKnown}</strong></div>
+      </div>
+      <div class="card-title" style="font-size:0.8rem; margin-bottom:0.5rem;">Spell slots</div>
+      <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+        ${[1,2,3,4].map(lvl => {
+          const max  = slots[`s${lvl}`] || 0;
+          const used = slotsUsed[lvl]   || 0;
+          if (max === 0) return '';
+          return `<div style="text-align:center;">
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.3rem;">Level ${lvl}</div>
+            <div style="display:flex; gap:0.3rem;">
+              ${Array.from({length: max}, (_, i) => `
+                <div class="nerve-die ${i >= max - used ? 'spent' : ''} mss-pip" data-level="${lvl}" data-i="${i}"
+                  style="cursor:pointer; font-size:0.75rem;">${i < max - used ? lvl : '·'}</div>`).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Prepared transmutation spells</div>
+      <p style="font-size:0.85rem; color:var(--text-dim);">Track your known spells here. Add them via the notes field below or manage them with your DM.</p>
+      <textarea class="form-textarea" id="mutator-spell-notes" placeholder="List your known cantrips and spells here…">${data.mutatorSpellNotes || ''}</textarea>
+    </div>
+  `;
+
+  // Spell slot pips
+  tc.querySelectorAll('.mss-pip').forEach(pip => {
+    pip.addEventListener('click', () => {
+      const level = parseInt(pip.dataset.level);
+      const max   = slots[`s${level}`] || 0;
+      const used  = (data.mutatorSpellSlotsUsed || {})[level] || 0;
+      mutate(() => {
+        data.mutatorSpellSlotsUsed = { ...(data.mutatorSpellSlotsUsed || {}) };
+        if (used < max) data.mutatorSpellSlotsUsed[level] = used + 1;
+        else data.mutatorSpellSlotsUsed[level] = 0;
+      });
+    });
+  });
+
+  tc.querySelector('#mutator-spell-notes')?.addEventListener('input', e => {
+    mutate(() => { data.mutatorSpellNotes = e.target.value; });
+  });
+}
+
 // ── NOTES TAB ────────────────────────────────────────────────────────────────
 function renderNotesTab(tc) {
   tc.innerHTML = `
@@ -1851,6 +2118,7 @@ function showShortRestModal() {
       `${diceToSpend}d${hitDie} + Con [${rolls.join(', ')}] = ${totalHealed} HP`,
       char.name
     );
+    if (char.class_id === 'mutator') mutate(() => { data.biomassUsed = 0; data.activeMutations = []; });
     showMsg(`Short rest: spent ${diceToSpend} hit ${diceToSpend === 1 ? 'die' : 'dice'}, healed ${totalHealed} HP.`);
     overlay.remove();
   });
@@ -1860,8 +2128,10 @@ function showShortRestModal() {
       if (ndRecovery > 0) {
         data.nerveDiceCurrent = Math.min(data.nerveDiceMax || char.level, (data.nerveDiceCurrent || 0) + ndRecovery);
       }
+      // Mutator: biomass always resets on short rest
+      if (char.class_id === 'mutator') { data.biomassUsed = 0; data.activeMutations = []; }
     });
-    showMsg('Short rest complete.' + (ndRecovery > 0 ? ` Recovered ${ndRecovery} Nerve Dice.` : ''));
+    showMsg('Short rest complete.' + (ndRecovery > 0 ? ` Recovered ${ndRecovery} Nerve Dice.` : '') + (char.class_id === 'mutator' ? ' Biomass restored.' : ''));
     overlay.remove();
   });
 }
@@ -1878,7 +2148,7 @@ function showLevelUpModal() {
 
   // For archetypes unlocked at this level
   let archetypeChoice = '';
-  if (newLevel === 3 && !data.archetypeId) {
+  if (char.class_id === 'outlaw' && newLevel === 3 && !data.archetypeId) {
     const archetypes = Object.values(OUTLAW.archetypes);
     archetypeChoice = `
       <div style="padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius); margin-bottom:0.75rem;">
@@ -1888,6 +2158,24 @@ function showLevelUpModal() {
             <label style="display:flex; gap:0.5rem; align-items:center; cursor:pointer;">
               <input type="radio" name="lvlup-archetype" value="${a.id}" />
               <span style="font-size:0.9rem;">${a.name}</span>
+            </label>
+          `).join('')}
+        </div>
+      </div>`;
+  }
+  if (char.class_id === 'mutator' && newLevel === 3 && !data.evolutionId) {
+    const evolutions = Object.values(MUTATOR.evolutions);
+    archetypeChoice = `
+      <div style="padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius); margin-bottom:0.75rem;">
+        <strong style="color:var(--gold)">Choose your evolution</strong>
+        <div style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.4rem;">
+          ${evolutions.map(e => `
+            <label style="display:flex; gap:0.5rem; align-items:flex-start; cursor:pointer;">
+              <input type="radio" name="lvlup-evolution" value="${e.id}" style="margin-top:0.2rem;" />
+              <div>
+                <div style="font-size:0.9rem; font-family:var(--font-display); color:var(--gold);">${e.name}</div>
+                <div style="font-size:0.8rem; color:var(--text-dim);">${e.description}</div>
+              </div>
             </label>
           `).join('')}
         </div>
@@ -2021,16 +2309,21 @@ function showLevelUpModal() {
     const confirmBtn = document.getElementById('lvlup-confirm');
     if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Levelling up…'; }
 
-    // Validate archetype choice if needed
-    if (newLevel === 3 && !data.archetypeId) {
+    // Validate archetype/evolution choice if needed
+    if (char.class_id === 'outlaw' && newLevel === 3 && !data.archetypeId) {
       const chosen = overlay.querySelector('input[name="lvlup-archetype"]:checked')?.value;
-      if (!chosen) { alert('Please choose an archetype.'); return; }
+      if (!chosen) { confirmBtn.disabled = false; confirmBtn.textContent = 'Level up'; alert('Please choose an archetype.'); return; }
+    }
+    if (char.class_id === 'mutator' && newLevel === 3 && !data.evolutionId) {
+      const chosen = overlay.querySelector('input[name="lvlup-evolution"]:checked')?.value;
+      if (!chosen) { confirmBtn.disabled = false; confirmBtn.textContent = 'Level up'; alert('Please choose an evolution.'); return; }
     }
 
     const hpGained = Math.max(1, parseInt(document.getElementById('lvlup-hp')?.value) || (Math.ceil(10/2)+1));
     const isFeatChoice = document.getElementById('asi-feat-radio')?.checked;
     const chosenFeatId = document.getElementById('asi-feat-picker')?.value;
     const chosenArchetype = overlay.querySelector('input[name="lvlup-archetype"]:checked')?.value;
+    const chosenEvolution = overlay.querySelector('input[name="lvlup-evolution"]:checked')?.value;
 
     // If the chosen feat has any player-choice effects, prompt for each before applying
     if (isASI && isFeatChoice && chosenFeatId) {
@@ -2100,6 +2393,7 @@ function showLevelUpModal() {
           data.maxHPOverride = null;
           data.nerveDiceCurrent = newProg.nerveDiceCount;
           if (chosenArchetype) { data.archetypeId = chosenArchetype; data.archetypeName = OUTLAW.archetypes[chosenArchetype]?.name || ''; }
+          if (chosenEvolution) { data.evolutionId = chosenEvolution; data.evolutionName = MUTATOR.evolutions[chosenEvolution]?.name || ''; }
           data.feats = data.feats || [];
           if (!data.feats.find(f => f.id === chosenFeatId)) {
             data.feats.push({ id: chosenFeatId, name: feat.name, description: feat.data?.description || '', effects: feat.data?.effects || [] });
