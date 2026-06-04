@@ -240,9 +240,10 @@ function renderSheetUI() {
 
   document.getElementById('hp-longrest')?.addEventListener('click', () => {
     const hitDie = getClassHitDie(char.class_id);
+    const ndFull = getNerveDice(char.level);
     const mhp = data.maxHPOverride || maxHP({ level: char.level, abilities: data.abilities, classId: char.class_id, classHitDie: hitDie });
     mutate(() => {
-      data.nerveDiceCurrent = nd.count;
+      data.nerveDiceCurrent = ndFull.count;
       data.currentHP = mhp;
       data.spellSlotsUsed = {};
       data.deathSaves = { successes: 0, failures: 0 };
