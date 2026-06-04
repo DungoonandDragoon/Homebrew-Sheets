@@ -111,13 +111,16 @@ function renderSheetUI() {
   const hp = data.currentHP ?? mhp;
   const hpPct = Math.max(0, Math.min(100, Math.round(hp / mhp * 100)));
   const hpClass = hpPct > 50 ? '' : hpPct > 25 ? ' low' : ' critical';
-  const prog = getProgression(char.level);
-  const archObj = data.archetypeId ? OUTLAW.archetypes[data.archetypeId] : null;
+  const prog = char.class_id === 'mutator'
+    ? getMutatorProgression(char.level)
+    : getProgression(char.level);
+  const archObj = char.class_id === 'outlaw' && data.archetypeId
+    ? OUTLAW.archetypes[data.archetypeId] : null;
 
   const tabs = [
     { id:'core',     label:'Core' },
     { id:'combat',   label:'Combat & Rolls' },
-    { id:'nerve',    label:'Nerve Dice' },
+    ...(char.class_id === 'outlaw' ? [{ id:'nerve', label:'Nerve Dice' }] : []),
     { id:'features', label:'Features' },
     { id:'inventory',label:'Inventory' },
     ...(data.archetypeId === 'arcane-artillerist' ? [{ id:'spells', label:'Spells' }] : []),
@@ -941,11 +944,19 @@ function renderFeaturesTab(tc) {
     </div>`;
   }
 
-  // ALL upcoming features (no slice limit)
-  const allBaseFeatures = Object.values(OUTLAW.features);
-  const allArchFeatures = data.archetypeId
-    ? Object.values(OUTLAW.archetypes[data.archetypeId]?.features || {})
-    : [];
+  // ALL upcoming features — class-aware
+  let allBaseFeatures, allArchFeatures;
+  if (char.class_id === 'mutator') {
+    allBaseFeatures = Object.values(MUTATOR.features);
+    allArchFeatures = data.evolutionId
+      ? Object.values(MUTATOR.evolutions[data.evolutionId]?.features || {})
+      : [];
+  } else {
+    allBaseFeatures = Object.values(OUTLAW.features);
+    allArchFeatures = data.archetypeId
+      ? Object.values(OUTLAW.archetypes[data.archetypeId]?.features || {})
+      : [];
+  }
   const upcoming = [...allBaseFeatures, ...allArchFeatures]
     .filter(f => f.level > char.level)
     .sort((a, b) => a.level - b.level);
@@ -1798,44 +1809,104 @@ function renderMutatorSpellsTab(tc) {
   const slots = getMutatorSpellSlots(char.level, data.evolutionId);
   if (!slots) { tc.innerHTML = '<div class="card">Spellcasting unlocks at Arcanist level 3.</div>'; return; }
 
-  const slotsUsed = data.mutatorSpellSlotsUsed || {};
-  const dc = derived.mutatorSpellSaveDC || (8 + derived.prof + derived.mods.intelligence);
-  const atk = derived.mutatorSpellAttackBonus || (derived.prof + derived.mods.intelligence);
+  const slotsUsed      = data.mutatorSpellSlotsUsed || {};
+  const knownCantrips  = data.mutatorCantrips  || [];
+  const knownSpells    = data.mutatorSpells     || [];
+  const dc  = derived.mutatorSpellSaveDC      || (8 + derived.prof + derived.mods.intelligence);
+  const atk = derived.mutatorSpellAttackBonus  || (derived.prof + derived.mods.intelligence);
 
-  tc.innerHTML = `
+  // Filter wizard spells to transmutation only
+  const transmutationSpells   = WIZARD_SPELLS.filter(s => s.school?.toLowerCase() === 'transmutation' && s.level > 0);
+  const transmutationCantrips = WIZARD_SPELLS.filter(s => s.school?.toLowerCase() === 'transmutation' && s.level === 0);
+  // Fallback: if school not tagged, show all spells (some spell lists may lack school field)
+  const spellPool    = transmutationSpells.length   > 0 ? transmutationSpells   : WIZARD_SPELLS.filter(s => s.level > 0);
+  const cantripPool  = transmutationCantrips.length > 0 ? transmutationCantrips : WIZARD_SPELLS.filter(s => s.level === 0);
+
+  let html = `
+    <!-- Stats row -->
     <div class="card" style="margin-bottom:1rem;">
       <div class="card-title">Arcanist spellcasting</div>
       <div style="display:flex; gap:1.5rem; flex-wrap:wrap; font-size:0.9rem; margin-bottom:1rem;">
         <div>Spell save DC <strong>${dc}</strong></div>
         <div>Spell attack <strong>${formatMod(atk)}</strong></div>
-        <div>Cantrips known <strong>${slots.cantripsKnown}</strong></div>
-        <div>Spells known <strong>${slots.spellsKnown}</strong></div>
+        <div>Cantrips known <strong style="color:${knownCantrips.length >= slots.cantripsKnown ? 'var(--green)' : 'var(--gold)'}">${knownCantrips.length} / ${slots.cantripsKnown}</strong></div>
+        <div>Spells known <strong style="color:${knownSpells.length >= slots.spellsKnown ? 'var(--green)' : 'var(--gold)'}">${knownSpells.length} / ${slots.spellsKnown}</strong></div>
       </div>
+
+      <!-- Spell slots -->
       <div class="card-title" style="font-size:0.8rem; margin-bottom:0.5rem;">Spell slots</div>
-      <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+      <div style="display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:1rem;">
         ${[1,2,3,4].map(lvl => {
           const max  = slots[`s${lvl}`] || 0;
           const used = slotsUsed[lvl]   || 0;
           if (max === 0) return '';
           return `<div style="text-align:center;">
             <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.3rem;">Level ${lvl}</div>
-            <div style="display:flex; gap:0.3rem;">
+            <div style="display:flex; gap:0.3rem; flex-wrap:wrap;">
               ${Array.from({length: max}, (_, i) => `
-                <div class="nerve-die ${i >= max - used ? 'spent' : ''} mss-pip" data-level="${lvl}" data-i="${i}"
-                  style="cursor:pointer; font-size:0.75rem;">${i < max - used ? lvl : '·'}</div>`).join('')}
+                <div class="nerve-die ${i >= max - used ? 'spent' : ''} mss-pip"
+                  data-level="${lvl}" style="cursor:pointer; font-size:0.75rem;">
+                  ${i < max - used ? lvl : '·'}
+                </div>`).join('')}
             </div>
           </div>`;
         }).join('')}
       </div>
     </div>
+
+    <!-- Cantrips -->
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="card-title">Cantrips (${knownCantrips.length} / ${slots.cantripsKnown})</div>
+      <p style="font-size:0.82rem; color:var(--text-dim); margin-bottom:0.5rem;">Transmutation cantrips from the wizard spell list.</p>
+      <div style="display:flex; flex-direction:column; gap:0.3rem;">
+        ${cantripPool.map(s => {
+          const isKnown = knownCantrips.includes(s.id);
+          const canPick = isKnown || knownCantrips.length < slots.cantripsKnown;
+          return `<label style="display:flex; gap:0.6rem; align-items:flex-start; padding:0.4rem 0.5rem;
+            border-radius:var(--radius); background:${isKnown ? 'var(--gold-glow)' : 'transparent'}; cursor:pointer;">
+            <input type="checkbox" class="mcantrip-pick" data-id="${s.id}" ${isKnown ? 'checked' : ''} ${!canPick ? 'disabled' : ''} style="margin-top:0.15rem;" />
+            <div>
+              <div style="font-size:0.88rem; font-weight:500;">${s.name}</div>
+              <div style="font-size:0.78rem; color:var(--text-dim);">${s.castTime} · ${s.range}</div>
+            </div>
+          </label>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- Known spells -->
     <div class="card">
-      <div class="card-title">Prepared transmutation spells</div>
-      <p style="font-size:0.85rem; color:var(--text-dim);">Track your known spells here. Add them via the notes field below or manage them with your DM.</p>
-      <textarea class="form-textarea" id="mutator-spell-notes" placeholder="List your known cantrips and spells here…">${data.mutatorSpellNotes || ''}</textarea>
+      <div class="card-title">Known spells (${knownSpells.length} / ${slots.spellsKnown})</div>
+      <p style="font-size:0.82rem; color:var(--text-dim); margin-bottom:0.5rem;">Transmutation spells from the wizard spell list. You must have a slot of the spell's level or higher to cast it.</p>
+      <div style="display:flex; flex-direction:column; gap:0.3rem;">
+        ${spellPool.map(s => {
+          const isKnown = knownSpells.includes(s.id);
+          const canPick = isKnown || knownSpells.length < slots.spellsKnown;
+          const slotAvail = slots[`s${s.level}`] > 0;
+          const used = (slotsUsed[s.level] || 0) >= (slots[`s${s.level}`] || 0);
+          return `<label style="display:flex; gap:0.6rem; align-items:flex-start; padding:0.4rem 0.5rem;
+            border-radius:var(--radius); background:${isKnown ? 'var(--gold-glow)' : 'transparent'}; cursor:pointer;">
+            <input type="checkbox" class="mspell-pick" data-id="${s.id}" ${isKnown ? 'checked' : ''} ${!canPick ? 'disabled' : ''} style="margin-top:0.15rem;" />
+            <div style="flex:1;">
+              <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <span style="font-size:0.88rem; font-weight:500;">${s.name}</span>
+                <span style="font-size:0.72rem; color:var(--text-muted);">Level ${s.level}</span>
+                ${s.concentration ? '<span style="font-size:0.7rem; color:var(--blue,#60a5fa);">Conc</span>' : ''}
+                ${!slotAvail ? '<span style="font-size:0.7rem; color:var(--text-muted);">(no slot)</span>' : ''}
+              </div>
+              <div style="font-size:0.78rem; color:var(--text-dim);">${s.castTime} · ${s.range}</div>
+            </div>
+            ${isKnown && slotAvail ? `<button class="btn btn-sm mspell-cast ${used ? '' : 'btn-gold'}"
+              data-level="${s.level}" data-name="${s.name}" ${used ? 'disabled' : ''} style="flex-shrink:0;">Cast</button>` : ''}
+          </label>`;
+        }).join('')}
+      </div>
     </div>
   `;
 
-  // Spell slot pips
+  tc.innerHTML = html;
+
+  // Slot pips — click to use/restore
   tc.querySelectorAll('.mss-pip').forEach(pip => {
     pip.addEventListener('click', () => {
       const level = parseInt(pip.dataset.level);
@@ -1843,14 +1914,57 @@ function renderMutatorSpellsTab(tc) {
       const used  = (data.mutatorSpellSlotsUsed || {})[level] || 0;
       mutate(() => {
         data.mutatorSpellSlotsUsed = { ...(data.mutatorSpellSlotsUsed || {}) };
-        if (used < max) data.mutatorSpellSlotsUsed[level] = used + 1;
-        else data.mutatorSpellSlotsUsed[level] = 0;
+        data.mutatorSpellSlotsUsed[level] = used < max ? used + 1 : 0;
       });
     });
   });
 
-  tc.querySelector('#mutator-spell-notes')?.addEventListener('input', e => {
-    mutate(() => { data.mutatorSpellNotes = e.target.value; });
+  // Cantrip selection
+  tc.querySelectorAll('.mcantrip-pick').forEach(cb => {
+    cb.addEventListener('change', () => {
+      mutate(() => {
+        const id = cb.dataset.id;
+        if (cb.checked) {
+          if ((data.mutatorCantrips || []).length < slots.cantripsKnown) {
+            data.mutatorCantrips = [...(data.mutatorCantrips || []), id];
+          } else { cb.checked = false; }
+        } else {
+          data.mutatorCantrips = (data.mutatorCantrips || []).filter(s => s !== id);
+        }
+      });
+    });
+  });
+
+  // Spell selection
+  tc.querySelectorAll('.mspell-pick').forEach(cb => {
+    cb.addEventListener('change', () => {
+      mutate(() => {
+        const id = cb.dataset.id;
+        if (cb.checked) {
+          if ((data.mutatorSpells || []).length < slots.spellsKnown) {
+            data.mutatorSpells = [...(data.mutatorSpells || []), id];
+          } else { cb.checked = false; }
+        } else {
+          data.mutatorSpells = (data.mutatorSpells || []).filter(s => s !== id);
+        }
+      });
+    });
+  });
+
+  // Cast button — spends a slot
+  tc.querySelectorAll('.mspell-cast').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      const level = parseInt(btn.dataset.level);
+      const max   = slots[`s${level}`] || 0;
+      const used  = (data.mutatorSpellSlotsUsed || {})[level] || 0;
+      if (used >= max) return;
+      mutate(() => {
+        data.mutatorSpellSlotsUsed = { ...(data.mutatorSpellSlotsUsed || {}) };
+        data.mutatorSpellSlotsUsed[level] = used + 1;
+      });
+      showMsg(`${btn.dataset.name} cast. Level ${level} slot used.`);
+    });
   });
 }
 
