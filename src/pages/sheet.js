@@ -165,6 +165,7 @@ function renderSheetUI() {
             <button class="btn btn-sm btn-gold" id="hp-heal">Heal</button>
             <button class="btn btn-sm" id="hp-temp">Set temp HP</button>
             <button class="btn btn-sm" id="hp-hitdie">Short rest</button>
+            <button class="btn btn-sm" id="hp-longrest">Long rest</button>
           </div>
         </div>
         <div>
@@ -235,6 +236,24 @@ function renderSheetUI() {
   });
   document.getElementById('hp-hitdie')?.addEventListener('click', () => {
     showShortRestModal();
+  });
+
+  document.getElementById('hp-longrest')?.addEventListener('click', () => {
+    const hitDie = getClassHitDie(char.class_id);
+    const mhp = data.maxHPOverride || maxHP({ level: char.level, abilities: data.abilities, classId: char.class_id, classHitDie: hitDie });
+    mutate(() => {
+      data.nerveDiceCurrent = nd.count;
+      data.currentHP = mhp;
+      data.spellSlotsUsed = {};
+      data.deathSaves = { successes: 0, failures: 0 };
+      const maxDice = char.level;
+      const used = data.hitDiceUsed || 0;
+      const restored = Math.min(used, Math.max(1, Math.ceil(maxDice / 2)));
+      data.hitDiceUsed = Math.max(0, used - restored);
+      if (data.recklessFusillade) data.recklessFusillade.used = 0;
+      if (data.legendaryDuel) data.legendaryDuel.used = false;
+    });
+    showMsg('Long rest complete. HP, Nerve Dice, spell slots, and hit dice restored.');
   });
 
   // Death saves
@@ -608,7 +627,7 @@ function renderTrickShotPanel() {
     <div class="card-title">Trick shots · DC ${derived.trickShotDC}</div>
     ${options.map(s => {
       const isSig = s.id === sig;
-      const cost = isSig ? Math.max(0, s.cost - 1) : s.cost;
+      const cost = isSig ? Math.max(0, s.cost - 1) : s.cost; // min 0 here is fine — nerve tab shows current cost, sig bonus applied once per turn in play
       return `<div class="nerve-action">
         <div class="nerve-action-info">
           <div class="nerve-action-name">${s.name} ${isSig ? '<span style="font-size:0.72rem; color:var(--green); font-family:var(--font-display);">SIGNATURE</span>' : ''}</div>
@@ -675,10 +694,7 @@ function renderNerveTab(tc) {
           </div>
         `).join('')}
       </div>
-      <div class="rest-row">
-        <button class="btn" id="short-rest">☽ Short rest</button>
-        <button class="btn btn-gold" id="long-rest">⚡ Long rest</button>
-      </div>
+
     </div>
     <div class="card">
       <div class="card-title">Spend nerve dice</div>
@@ -717,28 +733,7 @@ function renderNerveTab(tc) {
     mutate(() => { data.nerveDiceCurrent = Math.min(nd.count, (data.nerveDiceCurrent ?? 0) + 1); });
   });
 
-  document.getElementById('short-rest')?.addEventListener('click', () => {
-    const recovery = shortRestNerveDiceRecovery({ level: char.level, classId: char.class_id });
-    mutate(() => { data.nerveDiceCurrent = Math.min(nd.count, (data.nerveDiceCurrent ?? 0) + recovery); });
-    showMsg(recovery > 0 ? `Short rest: recovered ${recovery} Nerve Dice.` : 'Short rest complete. (Nerve Dice recover on long rest until level 14.)');
-  });
-
-  document.getElementById('long-rest')?.addEventListener('click', () => {
-    mutate(() => {
-      data.nerveDiceCurrent = nd.count;
-      data.currentHP = data.maxHPOverride || maxHP({ level: char.level, abilities: data.abilities, classId: char.class_id, classHitDie: getClassHitDie(char.class_id) });
-      data.spellSlotsUsed = {};
-      data.deathSaves = { successes: 0, failures: 0 };
-      // Restore half the character's hit dice (rounded up), per official rules
-      const maxDice = char.level;
-      const used = data.hitDiceUsed || 0;
-      const restored = Math.min(used, Math.max(1, Math.ceil(maxDice / 2)));
-      data.hitDiceUsed = Math.max(0, used - restored);
-      if (data.recklessFusillade) data.recklessFusillade.used = 0;
-      if (data.legendaryDuel) data.legendaryDuel.used = false;
-    });
-    showMsg('Long rest complete. HP, Nerve Dice, spell slots, and hit dice restored.');
-  });
+  // Short rest and long rest are handled by the sheet header buttons
 
   tc.querySelectorAll('.nd-spend').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1516,7 +1511,7 @@ function renderTrickShotsTab(tc) {
       <div class="card">
         <div class="card-title">Signature move</div>
         <p style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.75rem;">
-          Your signature move costs 1 fewer Nerve Die per use (minimum 1). It still costs at least 1 die. You may change it on a long rest.
+          Once per turn, your signature move costs 1 fewer Nerve Die. You may change it on a long rest.
         </p>
         <div style="display:flex; flex-direction:column; gap:0.4rem;">
           ${known.map(id => {
@@ -1531,7 +1526,7 @@ function renderTrickShotsTab(tc) {
                 <input type="radio" name="sig-radio" value="${s.id}" ${isSig ? 'checked' : ''} />
                 <div style="flex:1;">
                   <div style="font-weight:500;">${s.name}</div>
-                  <div style="font-size:0.8rem; color:var(--text-dim);">${s.cost} die → ${Math.max(1, s.cost - 1)} die as signature (min 1)</div>
+                  <div style="font-size:0.8rem; color:var(--text-dim);">Cost reduced by 1 die once per turn</div>
                 </div>
                 ${isSig ? '<span style="font-size:0.75rem; color:var(--green); font-family:var(--font-display);">ACTIVE</span>' : ''}
               </label>
@@ -1794,7 +1789,7 @@ function showShortRestModal() {
     <div class="modal">
       <div class="modal-title">Short rest</div>
       <div style="font-size:0.9rem; color:var(--text-dim); margin-bottom:1rem;">
-        <div>Available hit dice: <strong style="color:var(--text)">${availableDice} / ${maxDice}</strong> (d${hitDie} + Con ${formatMod(derived.mods.constitution)} each)</div>
+        <div>Available hit dice: <strong style="color:var(--text)">${availableDice} / ${maxDice}</strong> — each die heals 1d${hitDie} + Con mod</div>
         <div>Current HP: <strong style="color:var(--text)">${currentHP} / ${mhp}</strong> (missing ${missingHP})</div>
         ${ndRecovery > 0 ? `<div>Nerve Dice recovered: <strong style="color:var(--gold)">${ndRecovery}</strong></div>` : ''}
       </div>
@@ -2021,6 +2016,10 @@ function showLevelUpModal() {
   document.getElementById('lvlup-cancel')?.addEventListener('click', () => overlay.remove());
 
   document.getElementById('lvlup-confirm')?.addEventListener('click', async () => {
+    // Prevent double-click re-submission
+    const confirmBtn = document.getElementById('lvlup-confirm');
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Levelling up…'; }
+
     // Validate archetype choice if needed
     if (newLevel === 3 && !data.archetypeId) {
       const chosen = overlay.querySelector('input[name="lvlup-archetype"]:checked')?.value;
