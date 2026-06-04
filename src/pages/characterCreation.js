@@ -1,9 +1,11 @@
 import { saveCharacter, getAllHomebrew } from '../lib/db.js';
 import { OUTLAW } from '../lib/classes/outlaw.js';
+import { MUTATOR } from '../lib/classes/mutator.js';
 import { maxHP } from '../lib/calculations.js';
 
 const CLASSES = [
-  { id: 'outlaw', name: 'Outlaw', hitDie: 10, description: 'A ranged martial who wins fights through speed, nerve, and precision.' },
+  { id: 'outlaw',  name: 'Outlaw',  hitDie: 10, description: 'A ranged martial who wins fights through speed, nerve, and precision.' },
+  { id: 'mutator', name: 'Mutator', hitDie: 10, description: 'A warrior of flesh and will, bending their own body into living weapons, armor, and tools of survival.' },
 ];
 
 // 2014 PHB fixed ability score bonuses per species.
@@ -78,6 +80,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
     classId: 'outlaw',
     level: 3,
     archetypeId: '',
+    evolutionId: '',
     speciesId: '',
     backgroundId: '',
     abilities: { strength:10, dexterity:10, constitution:10, intelligence:10, wisdom:10, charisma:10 },
@@ -195,52 +198,78 @@ export async function renderCharacterCreation(container, userId, navigate) {
       `;
     }
 
-    if (step === 3 && draft.classId === 'outlaw') {
-      const archetypes = Object.values(OUTLAW.archetypes);
-      html += `
-        <div class="card">
-          <div class="card-title">Outlaw archetype</div>
-          ${draft.level >= 3 ? `
-            <p style="font-size:0.9rem; color:var(--text-dim); margin-bottom:1rem;">At level 3, you choose an archetype that defines your style.</p>
-            <div style="display:flex; flex-direction:column; gap:0.75rem;">
-              ${archetypes.map(a => `
-                <label style="display:flex; gap:0.75rem; align-items:flex-start; cursor:pointer; padding:0.75rem; border:1px solid ${draft.archetypeId===a.id?'var(--gold-dim)':'var(--border)'}; border-radius:var(--radius); background:${draft.archetypeId===a.id?'var(--gold-glow)':'var(--bg-raised)'}; transition:all 0.15s;">
-                  <input type="radio" name="archetype" value="${a.id}" ${draft.archetypeId===a.id?'checked':''} style="margin-top:0.2rem;" />
+    if (step === 3) {
+      if (draft.classId === 'outlaw') {
+        const archetypes = Object.values(OUTLAW.archetypes);
+        html += `
+          <div class="card">
+            <div class="card-title">Outlaw archetype</div>
+            ${draft.level >= 3 ? `
+              <p style="font-size:0.9rem; color:var(--text-dim); margin-bottom:1rem;">At level 3, you choose an archetype that defines your style.</p>
+              <div style="display:flex; flex-direction:column; gap:0.75rem;">
+                ${archetypes.map(a => `
+                  <label style="display:flex; gap:0.75rem; align-items:flex-start; cursor:pointer; padding:0.75rem; border:1px solid ${draft.archetypeId===a.id?'var(--gold-dim)':'var(--border)'}; border-radius:var(--radius); background:${draft.archetypeId===a.id?'var(--gold-glow)':'var(--bg-raised)'}; transition:all 0.15s;">
+                    <input type="radio" name="archetype" value="${a.id}" ${draft.archetypeId===a.id?'checked':''} style="margin-top:0.2rem;" />
+                    <div>
+                      <div style="font-family:var(--font-display); font-size:0.85rem; letter-spacing:0.05em; color:var(--gold); margin-bottom:0.25rem;">${a.name}</div>
+                      <div style="font-size:0.85rem; color:var(--text-dim);">${getArchetypeBlurb(a.id)}</div>
+                    </div>
+                  </label>
+                `).join('')}
+              </div>
+            ` : `
+              <p style="font-size:0.9rem; color:var(--text-dim);">Archetype choice unlocks at level 3. You will be prompted to choose when you reach that level.</p>
+            `}
+          </div>
+        `;
+        if (draft.archetypeId === 'gunslinger' && draft.level >= 3) {
+          const shots = OUTLAW.archetypes.gunslinger.trickShots.options;
+          const needed = 3 + OUTLAW.archetypes.gunslinger.trickShots.additionalLevels.filter(l => l <= draft.level).length;
+          html += `
+            <div class="card" style="margin-top:1rem;">
+              <div class="card-title">Trick shots (choose ${needed})</div>
+              ${shots.map(s => `
+                <label style="display:flex; gap:0.75rem; align-items:flex-start; padding:0.5rem 0; border-bottom:1px solid var(--border); cursor:pointer;">
+                  <input type="checkbox" name="trick" value="${s.id}" ${draft.selectedTrickShots.includes(s.id)?'checked':''} />
                   <div>
-                    <div style="font-family:var(--font-display); font-size:0.85rem; letter-spacing:0.05em; color:var(--gold); margin-bottom:0.25rem;">${a.name}</div>
-                    <div style="font-size:0.85rem; color:var(--text-dim);">${getArchetypeBlurb(a.id)}</div>
+                    <div style="font-size:0.9rem; font-weight:500;">${s.name} <span style="color:var(--text-muted); font-size:0.8rem;">(${s.cost} die)</span></div>
+                    <div style="font-size:0.82rem; color:var(--text-dim);">${s.description}</div>
                   </div>
                 </label>
               `).join('')}
             </div>
-          ` : `
-            <p style="font-size:0.9rem; color:var(--text-dim);">Archetype choice unlocks at level 3. You will be prompted to choose when you reach that level.</p>
-          `}
-        </div>
-      `;
+          `;
+        }
+      }
 
-      if (draft.archetypeId === 'gunslinger' && draft.level >= 3) {
-        const shots = OUTLAW.archetypes.gunslinger.trickShots.options;
-        const needed = 3 + OUTLAW.archetypes.gunslinger.trickShots.additionalLevels.filter(l => l <= draft.level).length;
+      if (draft.classId === 'mutator') {
+        const evolutions = Object.values(MUTATOR.evolutions);
         html += `
-          <div class="card" style="margin-top:1rem;">
-            <div class="card-title">Trick shots (choose ${needed})</div>
-            ${shots.map(s => `
-              <label style="display:flex; gap:0.75rem; align-items:flex-start; padding:0.5rem 0; border-bottom:1px solid var(--border); cursor:pointer;">
-                <input type="checkbox" name="trick" value="${s.id}" ${draft.selectedTrickShots.includes(s.id)?'checked':''} />
-                <div>
-                  <div style="font-size:0.9rem; font-weight:500;">${s.name} <span style="color:var(--text-muted); font-size:0.8rem;">(${s.cost} die)</span></div>
-                  <div style="font-size:0.82rem; color:var(--text-dim);">${s.description}</div>
-                </div>
-              </label>
-            `).join('')}
+          <div class="card">
+            <div class="card-title">Mutator evolution</div>
+            ${draft.level >= 3 ? `
+              <p style="font-size:0.9rem; color:var(--text-dim); margin-bottom:1rem;">At level 3, your biomantical powers evolve. Choose your evolution path.</p>
+              <div style="display:flex; flex-direction:column; gap:0.75rem;">
+                ${evolutions.map(e => `
+                  <label style="display:flex; gap:0.75rem; align-items:flex-start; cursor:pointer; padding:0.75rem; border:1px solid ${draft.evolutionId===e.id?'var(--gold-dim)':'var(--border)'}; border-radius:var(--radius); background:${draft.evolutionId===e.id?'var(--gold-glow)':'var(--bg-raised)'}; transition:all 0.15s;">
+                    <input type="radio" name="evolution" value="${e.id}" ${draft.evolutionId===e.id?'checked':''} style="margin-top:0.2rem;" />
+                    <div>
+                      <div style="font-family:var(--font-display); font-size:0.85rem; letter-spacing:0.05em; color:var(--gold); margin-bottom:0.25rem;">${e.name}</div>
+                      <div style="font-size:0.85rem; color:var(--text-dim);">${e.description}</div>
+                    </div>
+                  </label>
+                `).join('')}
+              </div>
+            ` : `
+              <p style="font-size:0.9rem; color:var(--text-dim);">Evolution choice unlocks at level 3. You will be prompted to choose when you reach that level.</p>
+            `}
           </div>
         `;
       }
     }
 
     if (step === 4) {
-      const cls = OUTLAW;
+      const cls = draft.classId === 'mutator' ? MUTATOR : OUTLAW;
       const skills = cls.skillChoices.options;
       const count = cls.skillChoices.count;
       html += `
@@ -310,7 +339,12 @@ export async function renderCharacterCreation(container, userId, navigate) {
     // Wire up events per step
     if (step === 1) {
       document.getElementById('f-name').addEventListener('input', e => draft.name = e.target.value);
-      document.getElementById('f-class').addEventListener('change', e => { draft.classId = e.target.value; });
+      document.getElementById('f-class').addEventListener('change', e => {
+        draft.classId = e.target.value;
+        draft.archetypeId = '';
+        draft.evolutionId = '';
+        draft.skillProficiencies = [];
+      });
       document.getElementById('f-level').addEventListener('change', e => { draft.level = parseInt(e.target.value); });
       document.getElementById('f-species').addEventListener('change', e => { draft.speciesId = e.target.value; });
       document.getElementById('f-background').addEventListener('change', e => { draft.backgroundId = e.target.value; });
@@ -343,6 +377,9 @@ export async function renderCharacterCreation(container, userId, navigate) {
     if (step === 3) {
       document.querySelectorAll('input[name="archetype"]').forEach(r => {
         r.addEventListener('change', e => { draft.archetypeId = e.target.value; renderStep(); });
+      });
+      document.querySelectorAll('input[name="evolution"]').forEach(r => {
+        r.addEventListener('change', e => { draft.evolutionId = e.target.value; renderStep(); });
       });
       document.querySelectorAll('input[name="trick"]').forEach(cb => {
         cb.addEventListener('change', e => {
@@ -390,12 +427,18 @@ export async function renderCharacterCreation(container, userId, navigate) {
 
   function validateStep() {
     if (step === 1 && !draft.name.trim()) { alert('Please enter a character name.'); return false; }
-    if (step === 3 && draft.level >= 3 && !draft.archetypeId) {
-      alert('Please choose an archetype. If starting below level 3, set your level on step 1 first.');
-      return false;
+    if (step === 3 && draft.level >= 3) {
+      if (draft.classId === 'outlaw' && !draft.archetypeId) {
+        alert('Please choose an archetype. If starting below level 3, set your level on step 1 first.');
+        return false;
+      }
+      if (draft.classId === 'mutator' && !draft.evolutionId) {
+        alert('Please choose an evolution. If starting below level 3, set your level on step 1 first.');
+        return false;
+      }
     }
     if (step === 4) {
-      const count = OUTLAW.skillChoices.count;
+      const count = (draft.classId === 'mutator' ? MUTATOR : OUTLAW).skillChoices.count;
       if (draft.skillProficiencies.length < count) { alert(`Please choose ${count} skill proficiencies.`); return false; }
       if (draft.skillProficiencies.length > count) { alert(`Please choose only ${count} skill proficiencies.`); return false; }
     }
@@ -497,9 +540,14 @@ export async function renderCharacterCreation(container, userId, navigate) {
         }
       }
 
-      const hp = draft.maxHPOverride || maxHP({ level: draft.level, abilities: finalAbilities, classId: draft.classId });
-      const archObj = draft.archetypeId ? OUTLAW.archetypes[draft.archetypeId] : null;
-      const ndMax = draft.level >= 2 ? (OUTLAW.progression.find(p => p.level === draft.level)?.nerveDiceCount || 0) : 0;
+      const classHitDie = draft.classId === 'mutator' ? MUTATOR.hitDie : (OUTLAW.hitDie || 10);
+      const hp = draft.maxHPOverride || maxHP({ level: draft.level, abilities: finalAbilities, classId: draft.classId, classHitDie });
+      const archObj = draft.classId === 'outlaw' && draft.archetypeId ? OUTLAW.archetypes[draft.archetypeId] : null;
+      const evoObj  = draft.classId === 'mutator' && draft.evolutionId ? MUTATOR.evolutions[draft.evolutionId] : null;
+      const ndMax = draft.classId === 'outlaw' && draft.level >= 2
+        ? (OUTLAW.progression.find(p => p.level === draft.level)?.nerveDiceCount || 0) : 0;
+      const mutProg = draft.classId === 'mutator'
+        ? MUTATOR.progression.find(p => p.level === draft.level) : null;
 
       const characterData = {
         name: draft.name,
@@ -508,11 +556,15 @@ export async function renderCharacterCreation(container, userId, navigate) {
         data: {
           archetypeId: draft.archetypeId,
           archetypeName: archObj?.name || '',
+          evolutionId: draft.evolutionId,
+          evolutionName: evoObj?.name || '',
           speciesId: draft.speciesId,
           backgroundId: draft.backgroundId,
           abilities: finalAbilities,
           skillProficiencies: draft.skillProficiencies,
-          saveProficiencies: draft.saveProficiencies,
+          saveProficiencies: draft.classId === 'mutator'
+            ? ['constitution','intelligence']
+            : draft.saveProficiencies,
           currentHP: draft.currentHP ?? hp,
           maxHPOverride: draft.maxHPOverride,
           tempHP: 0,
@@ -527,6 +579,14 @@ export async function renderCharacterCreation(container, userId, navigate) {
           feats: [],
           selectedTrickShots: draft.selectedTrickShots,
           signatureMove: null,
+          // Mutator resources
+          knownMutations: [],
+          activeMutations: [],
+          bioshockedMutations: [],
+          biomassUsed: 0,
+          bioshocksUsed: 0,
+          mutatorSpellSlotsUsed: {},
+          mutatorSpellNotes: '',
           recklessFusillade: { used: 0 },
           legendaryDuel: { used: false },
           runeActive: 'None',
