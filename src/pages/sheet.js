@@ -414,9 +414,10 @@ function renderFeatsCard() {
 
 function renderProficienciesCard() {
   const profs = data.proficiencies || {};
-  const armor = profs.armor || 'Light armor, Medium armor, Shields';
-  const weapons = profs.weapons || 'Simple weapons, Firearms, Hand crossbows, Shortswords';
-  const tools = profs.tools || '—';
+  const isMutator = char.class_id === 'mutator';
+  const armor   = profs.armor   || (isMutator ? 'Light armor, Medium armor, Shields'                          : 'Light armor, Medium armor, Shields');
+  const weapons = profs.weapons || (isMutator ? 'Simple weapons, Martial weapons'                             : 'Simple weapons, Firearms, Hand crossbows, Shortswords');
+  const tools   = profs.tools   || (isMutator ? "Herbalism kit, Poisoner's kit"                               : '—');
   const languages = ['Common', ...(data.chosenLanguages || [])].filter((v, i, a) => a.indexOf(v) === i);
   // Add species-granted fixed languages
   const speciesLanguages = {
@@ -1996,15 +1997,18 @@ function renderAdminTab(tc) {
       <p style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.75rem;">Edit armor, weapon, tool, and other proficiencies shown on the Core tab. Leave blank to use the class defaults.</p>
       <div class="form-group">
         <label>Armor proficiencies</label>
-        <input class="form-input" id="admin-prof-armor" value="${(data.proficiencies||{}).armor || ''}" placeholder="Light armor, Medium armor, Shields" />
+        <input class="form-input" id="admin-prof-armor" value="${(data.proficiencies||{}).armor || ''}"
+          placeholder="${char.class_id === 'mutator' ? 'Light armor, Medium armor, Shields' : 'Light armor, Medium armor, Shields'}" />
       </div>
       <div class="form-group">
         <label>Weapon proficiencies</label>
-        <input class="form-input" id="admin-prof-weapons" value="${(data.proficiencies||{}).weapons || ''}" placeholder="Simple weapons, Firearms, Hand crossbows, Shortswords" />
+        <input class="form-input" id="admin-prof-weapons" value="${(data.proficiencies||{}).weapons || ''}"
+          placeholder="${char.class_id === 'mutator' ? 'Simple weapons, Martial weapons' : 'Simple weapons, Firearms, Hand crossbows, Shortswords'}" />
       </div>
       <div class="form-group">
         <label>Tool proficiencies</label>
-        <input class="form-input" id="admin-prof-tools" value="${(data.proficiencies||{}).tools || ''}" placeholder="e.g. Thieves' tools, Herbalism kit" />
+        <input class="form-input" id="admin-prof-tools" value="${(data.proficiencies||{}).tools || ''}"
+          placeholder="${char.class_id === 'mutator' ? 'Herbalism kit, Poisoner\'s kit' : 'e.g. Thieves\' tools, Herbalism kit'}" />
       </div>
       <div class="form-group">
         <label>Other proficiencies / notes</label>
