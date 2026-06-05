@@ -17,7 +17,7 @@ export async function renderDMView(container, navigate) {
     const hp = data.currentHP ?? 0;
     const mhp = maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id });
     const pct = Math.max(0, Math.min(100, Math.round(hp / mhp * 100)));
-    const archName = data.archetypeName || '';
+    const archName = data.archetypeName || data.evolutionName || '';
     const conditions = (data.conditions || []).join(', ') || '—';
     const nd = data.nerveDiceCurrent ?? '?';
     const ndMax = data.nerveDiceMax ?? '?';
