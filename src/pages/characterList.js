@@ -18,11 +18,11 @@ export async function renderCharacterList(container, userId, navigate) {
       const hp = data.currentHP ?? maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id });
       const mhp = maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id });
       const pct = Math.max(0, Math.min(100, Math.round(hp / mhp * 100)));
-      const archName = data.archetypeName || '';
+      const subclassName = data.archetypeName || data.evolutionName || '';
       return `
         <div class="char-card" data-id="${c.id}">
           <div class="char-card-name">${c.name}</div>
-          <div class="char-card-meta">Level ${c.level} ${c.class_id.charAt(0).toUpperCase() + c.class_id.slice(1)}${archName ? ' · ' + archName : ''}</div>
+          <div class="char-card-meta">Level ${c.level} ${c.class_id.charAt(0).toUpperCase() + c.class_id.slice(1)}${subclassName ? ' · ' + subclassName : ''}</div>
           <div class="char-card-hp">
             <span>${hp} / ${mhp} HP</span>
             <div class="hp-bar-mini"><div class="hp-bar-mini-fill" style="width:${pct}%"></div></div>
