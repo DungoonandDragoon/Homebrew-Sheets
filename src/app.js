@@ -256,7 +256,11 @@ function showExtensionModal() {
         <span style="color:var(--gold);">What it does:</span> When you roll on your character sheet, a card appears on your DnDBeyond page showing the roll result. You can also paste a Discord webhook URL into the extension popup to have rolls posted to your server automatically.
       </div>
 
-      <div class="modal-footer">
+      <div class="modal-footer" style="justify-content:space-between;">
+        <a class="btn btn-gold" href="https://github.com/DungoonandDragoon/Homebrew-Sheets/raw/main/extension.zip"
+          download style="text-decoration:none; display:inline-flex; align-items:center; gap:0.4rem;">
+          ⬇ Download Extension
+        </a>
         <button class="btn" id="ext-modal-close">Close</button>
       </div>
     </div>
