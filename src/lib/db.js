@@ -49,24 +49,33 @@ export async function getCharacter(characterId) {
 }
 
 export async function saveCharacter(character, userId) {
-  const payload = {
-    ...character,
-    user_id: userId,
-    updated_at: new Date().toISOString(),
-  };
   if (character.id) {
+    // UPDATE — never overwrite user_id; the row belongs to the player.
+    // DMs editing a character must not claim ownership via their own userId.
+    const { id, user_id, created_at, ...updateFields } = character;
+    const payload = {
+      ...updateFields,
+      updated_at: new Date().toISOString(),
+    };
     const { data, error } = await supabase
       .from('characters')
       .update(payload)
-      .eq('id', character.id)
+      .eq('id', id)
       .select()
       .single();
     if (error) throw error;
     return data;
   } else {
+    // INSERT — new character, assign to the creating user
+    const payload = {
+      ...character,
+      user_id: userId,
+      updated_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+    };
     const { data, error } = await supabase
       .from('characters')
-      .insert({ ...payload, created_at: new Date().toISOString() })
+      .insert(payload)
       .select()
       .single();
     if (error) throw error;
