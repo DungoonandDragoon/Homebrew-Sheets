@@ -1,4 +1,4 @@
-import { getCharacter, saveCharacter, getAllHomebrew } from '../lib/db.js';
+import { getCharacter, saveCharacter, getAllHomebrew, supabase } from '../lib/db.js';
 import { deriveStats, maxHP, getMisfireScore, weaponAttack, shortRestNerveDiceRecovery,
          SKILL_LABELS, SKILL_ABILITY_LABELS, ABILITY_LABELS, CONDITIONS, formatMod } from '../lib/calculations.js';
 import { OUTLAW, getProgression, getUnlockedFeatures, getNerveDice } from '../lib/classes/outlaw.js';
@@ -9,6 +9,27 @@ import { sendRollToDnDBeyond, rollDie, rollDice } from '../app.js';
 let char = null;       // raw DB record
 let data = null;       // char.data shorthand
 let derived = null;    // computed stats
+
+// Subspecies trait data — mirrors characterCreation.js
+const SUBSPECIES_TRAITS = {
+  'dwarf': {
+    'hill-dwarf':     { label: 'Hill Dwarf',        traits: [{ name: 'Dwarven Toughness', description: 'Your hit point maximum increases by 1, and increases by 1 every time you gain a level.' }] },
+    'mountain-dwarf': { label: 'Mountain Dwarf',    traits: [{ name: 'Dwarven Armor Training', description: 'Proficiency with light and medium armor.' }] },
+  },
+  'elf': {
+    'high-elf':  { label: 'High Elf',        traits: [{ name: 'Elf Weapon Training', description: 'Proficiency with longsword, shortsword, shortbow, and longbow.' }, { name: 'Cantrip', description: 'You know one cantrip of your choice from the wizard spell list. Intelligence is your spellcasting ability.' }, { name: 'Extra Language', description: 'You can speak, read, and write one extra language of your choice.' }] },
+    'wood-elf':  { label: 'Wood Elf',        traits: [{ name: 'Elf Weapon Training', description: 'Proficiency with longsword, shortsword, shortbow, and longbow.' }, { name: 'Fleet of Foot', description: 'Your base walking speed increases to 35 feet.' }, { name: 'Mask of the Wild', description: 'You can attempt to hide even when only lightly obscured by natural phenomena.' }] },
+    'dark-elf':  { label: 'Dark Elf (Drow)', traits: [{ name: 'Superior Darkvision', description: 'Darkvision range of 120 feet.' }, { name: 'Sunlight Sensitivity', description: 'Disadvantage on attack rolls and perception checks relying on sight in direct sunlight.' }, { name: 'Drow Magic', description: 'Dancing Lights cantrip. Faerie Fire at 3rd level. Darkness at 5th level. Charisma is your spellcasting ability.' }, { name: 'Drow Weapon Training', description: 'Proficiency with rapiers, shortswords, and hand crossbows.' }] },
+  },
+  'halfling': {
+    'lightfoot': { label: 'Lightfoot', traits: [{ name: 'Naturally Stealthy', description: 'You can attempt to hide even when obscured only by a creature at least one size larger than you.' }] },
+    'stout':     { label: 'Stout',     traits: [{ name: 'Stout Resilience', description: 'Advantage on saving throws against poison, and resistance to poison damage.' }] },
+  },
+  'gnome': {
+    'forest-gnome': { label: 'Forest Gnome', traits: [{ name: 'Natural Illusionist', description: 'You know the Minor Illusion cantrip. Intelligence is your spellcasting ability.' }, { name: 'Speak with Small Beasts', description: 'You can communicate simple ideas with Small or smaller beasts.' }] },
+    'rock-gnome':   { label: 'Rock Gnome',   traits: [{ name: "Artificer's Lore", description: 'Double proficiency on History checks related to magical, alchemical, or technological items.' }, { name: 'Tinker', description: "Proficiency with tinker's tools. You can spend 1 hour and 10gp to construct a Tiny clockwork device." }] },
+  },
+};
 let homebrew = [];
 let activeTab = 'core';
 let saveTimer = null;
@@ -99,6 +120,37 @@ export async function renderSheet(container, characterId, uid, dm, navigate) {
     data.nerveDiceMax = nd.count;
     if (data.nerveDiceCurrent === undefined) data.nerveDiceCurrent = nd.count;
   }
+
+  // ── Realtime sync ────────────────────────────────────────────────────────
+  // Subscribe to changes on this character row so DM edits (HP, conditions,
+  // admin changes) appear live on the player's screen and vice versa.
+  const realtimeChannel = supabase
+    .channel('character-' + characterId)
+    .on(
+      'postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'characters', filter: `id=eq.${characterId}` },
+      (payload) => {
+        // Ignore updates we ourselves just triggered (auto-save sends them back)
+        // by comparing updated_at — if it's within 2s of our last save, skip.
+        const incomingUpdatedAt = new Date(payload.new.updated_at).getTime();
+        const now = Date.now();
+        if (now - incomingUpdatedAt < 2000 && saveTimer === null) return;
+
+        // Merge incoming data — remote wins for everything except active UI state
+        // that the player is currently interacting with (notes textarea etc.)
+        const remote = payload.new;
+        char.name    = remote.name;
+        char.level   = remote.level;
+        char.class_id = remote.class_id;
+        Object.assign(data, remote.data);
+        derived = deriveStats(buildCharacterForCalc());
+        renderSheetUI();
+      }
+    )
+    .subscribe();
+
+  // Clean up subscription when navigating away
+  window._hbsRealtimeChannel = realtimeChannel;
 
   renderSheetUI();
 }
@@ -836,16 +888,28 @@ function renderFeaturesTab(tc) {
   // Species features
   if (speciesEntry || data.speciesId) {
     const builtinSpeciesTraits = getBuiltinSpeciesTraits(data.speciesId);
+    const subspeciesData = data.subspeciesId && SUBSPECIES_TRAITS[data.speciesId]?.[data.subspeciesId];
+    const subspeciesTraits = subspeciesData?.traits || [];
     const allTraits = [...builtinSpeciesTraits, ...speciesTraits];
-    if (allTraits.length > 0) {
+    if (allTraits.length > 0 || subspeciesTraits.length > 0) {
+      const speciesLabel = speciesEntry?.name || data.speciesId || '';
+      const subspeciesLabel = subspeciesData?.label ? ` · ${subspeciesData.label}` : '';
       html += `<div class="card" style="margin-bottom:1rem;">
-        <div class="card-title">Species traits · ${speciesEntry?.name || data.speciesId || ''}</div>
+        <div class="card-title">Species traits · ${speciesLabel}${subspeciesLabel}</div>
         ${allTraits.map(t => `
           <div class="feature-item">
             <div class="feature-name">${t.name || t.abilityName || 'Trait'}</div>
             <div class="feature-desc">${t.description || ''}</div>
           </div>
         `).join('')}
+        ${subspeciesTraits.length > 0 ? `
+          <div style="font-family:var(--font-display); font-size:0.62rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin:0.75rem 0 0.4rem;">${subspeciesData.label} traits</div>
+          ${subspeciesTraits.map(t => `
+            <div class="feature-item">
+              <div class="feature-name">${t.name}</div>
+              <div class="feature-desc">${t.description}</div>
+            </div>
+          `).join('')}` : ''}
       </div>`;
     }
   }
