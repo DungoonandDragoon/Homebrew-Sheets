@@ -22,6 +22,51 @@ const BUILTIN_SPECIES_BONUSES = {
   // half-elf: +2 Cha fixed + two player-choice +1s — handled via modal in createCharacter()
 };
 
+// 2014 PHB subspecies definitions
+// Each entry: { label, bonuses, traits[] }
+const SUBSPECIES = {
+  'dwarf': {
+    'hill-dwarf':     { label: 'Hill Dwarf',     bonuses: { wisdom: 1 },    traits: [{ name: 'Dwarven Toughness', description: 'Your hit point maximum increases by 1, and increases by 1 every time you gain a level.' }] },
+    'mountain-dwarf': { label: 'Mountain Dwarf', bonuses: { strength: 2 },  traits: [{ name: 'Dwarven Armor Training', description: 'Proficiency with light and medium armor.' }] },
+  },
+  'elf': {
+    'high-elf': { label: 'High Elf', bonuses: { intelligence: 1 }, traits: [
+      { name: 'Elf Weapon Training', description: 'Proficiency with longsword, shortsword, shortbow, and longbow.' },
+      { name: 'Cantrip', description: 'You know one cantrip of your choice from the wizard spell list. Intelligence is your spellcasting ability.' },
+      { name: 'Extra Language', description: 'You can speak, read, and write one extra language of your choice.' },
+    ]},
+    'wood-elf': { label: 'Wood Elf', bonuses: { wisdom: 1 }, traits: [
+      { name: 'Elf Weapon Training', description: 'Proficiency with longsword, shortsword, shortbow, and longbow.' },
+      { name: 'Fleet of Foot', description: 'Your base walking speed increases to 35 feet.' },
+      { name: 'Mask of the Wild', description: 'You can attempt to hide even when you are only lightly obscured by foliage, heavy rain, falling snow, mist, or other natural phenomena.' },
+    ]},
+    'dark-elf': { label: 'Dark Elf (Drow)', bonuses: { charisma: 1 }, traits: [
+      { name: 'Superior Darkvision', description: 'Your darkvision has a range of 120 feet.' },
+      { name: 'Sunlight Sensitivity', description: 'Disadvantage on attack rolls and perception checks that rely on sight when you or the target is in direct sunlight.' },
+      { name: 'Drow Magic', description: 'You know the Dancing Lights cantrip. At 3rd level you can cast Faerie Fire once per long rest. At 5th level you can cast Darkness once per long rest. Charisma is your spellcasting ability.' },
+      { name: 'Drow Weapon Training', description: 'Proficiency with rapiers, shortswords, and hand crossbows.' },
+    ]},
+  },
+  'halfling': {
+    'lightfoot': { label: 'Lightfoot', bonuses: { charisma: 1 }, traits: [
+      { name: 'Naturally Stealthy', description: 'You can attempt to hide even when you are obscured only by a creature that is at least one size larger than you.' },
+    ]},
+    'stout': { label: 'Stout', bonuses: { constitution: 1 }, traits: [
+      { name: 'Stout Resilience', description: 'Advantage on saving throws against poison, and resistance to poison damage.' },
+    ]},
+  },
+  'gnome': {
+    'forest-gnome': { label: 'Forest Gnome', bonuses: { dexterity: 1 }, traits: [
+      { name: 'Natural Illusionist', description: 'You know the Minor Illusion cantrip. Intelligence is your spellcasting ability.' },
+      { name: 'Speak with Small Beasts', description: 'You can communicate simple ideas with Small or smaller beasts through sounds and gestures.' },
+    ]},
+    'rock-gnome': { label: 'Rock Gnome', bonuses: { constitution: 1 }, traits: [
+      { name: "Artificer's Lore", description: 'Whenever you make a History check related to magical, alchemical, or technological items, double your proficiency bonus.' },
+      { name: 'Tinker', description: 'Proficiency with artisan tools (tinker's tools). You can spend 1 hour and 10gp to construct a Tiny clockwork device (AC 5, 1 HP).' },
+    ]},
+  },
+};
+
 // Species that need a player to pick some or all of their ASI targets
 const SPECIES_WITH_CHOICES = {
   'half-elf': {
@@ -82,6 +127,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
     archetypeId: '',
     evolutionId: '',
     speciesId: '',
+    subspeciesId: '',
     backgroundId: '',
     abilities: { strength:10, dexterity:10, constitution:10, intelligence:10, wisdom:10, charisma:10 },
     skillProficiencies: [],
@@ -140,6 +186,39 @@ export async function renderCharacterCreation(container, userId, navigate) {
               </select>
             </div>
           </div>
+          ${(() => {
+            // Built-in subspecies
+            if (SUBSPECIES[draft.speciesId]) {
+              return `<div class="form-row cols-2">
+                <div class="form-group">
+                  <label>Subspecies</label>
+                  <select class="form-select" id="f-subspecies">
+                    <option value="">Select subspecies</option>
+                    ${Object.entries(SUBSPECIES[draft.speciesId]).map(([id, s]) =>
+                      `<option value="${id}" ${draft.subspeciesId===id?'selected':''}>${s.label}</option>`
+                    ).join('')}
+                  </select>
+                </div>
+              </div>`;
+            }
+            // Homebrew subspecies
+            const hbSp = allSpecies.find(s => s.id === draft.speciesId);
+            const hbSubs = hbSp?.data?.subspecies;
+            if (hbSubs?.length) {
+              return `<div class="form-row cols-2">
+                <div class="form-group">
+                  <label>Subspecies</label>
+                  <select class="form-select" id="f-subspecies">
+                    <option value="">Select subspecies</option>
+                    ${hbSubs.map((s, i) =>
+                      `<option value="hb_sub_${i}" ${'hb_sub_'+i===draft.subspeciesId?'selected':''}>${s.name}</option>`
+                    ).join('')}
+                  </select>
+                </div>
+              </div>`;
+            }
+            return '';
+          })()}
         </div>
       `;
     }
@@ -346,7 +425,14 @@ export async function renderCharacterCreation(container, userId, navigate) {
         draft.skillProficiencies = [];
       });
       document.getElementById('f-level').addEventListener('change', e => { draft.level = parseInt(e.target.value); });
-      document.getElementById('f-species').addEventListener('change', e => { draft.speciesId = e.target.value; });
+      document.getElementById('f-species').addEventListener('change', e => {
+        draft.speciesId = e.target.value;
+        draft.subspeciesId = '';
+        renderStep();
+      });
+      document.getElementById('f-subspecies')?.addEventListener('change', e => {
+        draft.subspeciesId = e.target.value;
+      });
       document.getElementById('f-background').addEventListener('change', e => { draft.backgroundId = e.target.value; });
     }
     if (step === 2) {
@@ -457,6 +543,14 @@ export async function renderCharacterCreation(container, userId, navigate) {
         }
       }
 
+      // Apply subspecies ASI bonuses
+      if (draft.subspeciesId && SUBSPECIES[draft.speciesId]?.[draft.subspeciesId]) {
+        const subBonuses = SUBSPECIES[draft.speciesId][draft.subspeciesId].bonuses || {};
+        for (const [ab, bonus] of Object.entries(subBonuses)) {
+          finalAbilities[ab] = Math.min(20, (finalAbilities[ab] || 10) + bonus);
+        }
+      }
+
       // Apply fixed portion of choice-based species, then prompt for the rest
       const speciesChoice = SPECIES_WITH_CHOICES[draft.speciesId];
       if (speciesChoice) {
@@ -559,6 +653,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
           evolutionId: draft.evolutionId,
           evolutionName: evoObj?.name || '',
           speciesId: draft.speciesId,
+          subspeciesId: draft.subspeciesId || null,
           backgroundId: draft.backgroundId,
           abilities: finalAbilities,
           skillProficiencies: draft.skillProficiencies,
