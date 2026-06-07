@@ -1,10 +1,10 @@
 import { getSession, onAuthChange, signInWithGoogle, signOut, isDM } from './lib/db.js';
 import { renderLogin } from './pages/login.js';
 import { renderCharacterList } from './pages/characterList.js';
-import { renderSheet } from './pages/sheet.js';
 import { renderCharacterCreation } from './pages/characterCreation.js';
 import { renderDMView } from './pages/dmView.js';
 import { renderHomebrewEditor } from './pages/homebrewEditor.js';
+// sheet.js is loaded lazily — only when a character is opened
 
 // ── State ────────────────────────────────────────────────────────────────────
 export const appState = {
@@ -98,6 +98,7 @@ async function render() {
       await renderCharacterList(content, appState.session.user.id, navigate);
       break;
     case 'sheet':
+      const { renderSheet } = await import('./pages/sheet.js');
       await renderSheet(content, appState.currentCharacterId, appState.session.user.id, appState.userIsDM && !appState.playerViewActive, navigate);
       break;
     case 'new-character':
