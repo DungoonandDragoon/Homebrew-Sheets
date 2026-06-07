@@ -212,6 +212,24 @@ export async function renderHomebrewEditor(container) {
                 ${['Tiny','Small','Medium','Large'].map(s => `<option value="${s}" ${item.data.size === s ? 'selected' : ''}>${s}</option>`).join('')}
               </select>
             </div>
+          </div>
+          <div style="margin-top:0.75rem;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
+              <div class="card-title" style="margin:0;">Subspecies (optional)</div>
+              <button class="btn btn-sm" id="add-subspecies">+ Add subspecies</button>
+            </div>
+            <div id="subspecies-list">
+              ${(item.data.subspecies || []).map((sub, si) => `
+                <div style="border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem 0.75rem; margin-bottom:0.5rem; background:var(--bg-raised);">
+                  <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.4rem;">
+                    <input class="form-input sub-name" data-si="${si}" value="${sub.name || ''}" placeholder="Subspecies name (e.g. Hill Dwarf)" style="flex:1;" />
+                    <button class="btn btn-sm btn-danger sub-remove" data-si="${si}">✕</button>
+                  </div>
+                  <textarea class="form-textarea sub-traits" data-si="${si}" placeholder="Traits description (one per line, or comma-separated)" style="font-size:0.82rem; min-height:60px;">${sub.traits || ''}</textarea>
+                </div>
+              `).join('')}
+              ${!(item.data.subspecies?.length) ? '<div style="color:var(--text-muted); font-size:0.85rem;">No subspecies defined. This species will have no subspecies picker.</div>' : ''}
+            </div>
           </div>` : ''}
 
         ${isBackground ? `
@@ -307,6 +325,56 @@ export async function renderHomebrewEditor(container) {
           <button class="btn btn-gold" id="hb-save">Save ${activeType}</button>
         </div>
       </div>`;
+  }
+
+  // ── Subspecies wiring ────────────────────────────────────────────────────
+  function wireSubspecies(item) {
+    if (!item.data) return;
+
+    function rerender() {
+      const list = document.getElementById('subspecies-list');
+      if (!list) return;
+      list.innerHTML = (item.data.subspecies || []).map((sub, si) => `
+        <div style="border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem 0.75rem; margin-bottom:0.5rem; background:var(--bg-raised);">
+          <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.4rem;">
+            <input class="form-input sub-name" data-si="${si}" value="${sub.name || ''}" placeholder="Subspecies name (e.g. Hill Dwarf)" style="flex:1;" />
+            <button class="btn btn-sm btn-danger sub-remove" data-si="${si}">✕</button>
+          </div>
+          <textarea class="form-textarea sub-traits" data-si="${si}" placeholder="Traits (comma-separated)" style="font-size:0.82rem; min-height:60px;">${sub.traits || ''}</textarea>
+        </div>
+      `).join('') || '<div style="color:var(--text-muted); font-size:0.85rem;">No subspecies defined.</div>';
+      wireRowEvents();
+    }
+
+    function wireRowEvents() {
+      document.querySelectorAll('.sub-name').forEach(input => {
+        input.addEventListener('input', () => {
+          const si = parseInt(input.dataset.si);
+          item.data.subspecies[si].name = input.value;
+        });
+      });
+      document.querySelectorAll('.sub-traits').forEach(ta => {
+        ta.addEventListener('input', () => {
+          const si = parseInt(ta.dataset.si);
+          item.data.subspecies[si].traits = ta.value;
+        });
+      });
+      document.querySelectorAll('.sub-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const si = parseInt(btn.dataset.si);
+          item.data.subspecies.splice(si, 1);
+          rerender();
+        });
+      });
+    }
+
+    document.getElementById('add-subspecies')?.addEventListener('click', () => {
+      item.data.subspecies = item.data.subspecies || [];
+      item.data.subspecies.push({ name: '', traits: '' });
+      rerender();
+    });
+
+    wireRowEvents();
   }
 
   // ── Effect wiring ─────────────────────────────────────────────────────────
@@ -462,6 +530,7 @@ export async function renderHomebrewEditor(container) {
     if (editingItem) {
       const item = editingItem;
       wireEffects(item);
+      wireSubspecies(item);
 
       document.getElementById('hb-cancel')?.addEventListener('click', () => {
         editingItem = null;
@@ -477,6 +546,7 @@ export async function renderHomebrewEditor(container) {
           item.data.speed      = parseInt(document.getElementById('hb-speed')?.value) || 30;
           item.data.darkvision = parseInt(document.getElementById('hb-darkvision')?.value) || 0;
           item.data.size       = document.getElementById('hb-size')?.value;
+          // Subspecies are saved live via wireSubspecies — no extra action needed here
         }
         if (activeType === 'background') {
           item.data.skillProficiencies = document.getElementById('hb-bg-skills')?.value.split(',').map(s => s.trim()).filter(Boolean) || [];
