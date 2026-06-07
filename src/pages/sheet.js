@@ -121,38 +121,50 @@ export async function renderSheet(container, characterId, uid, dm, navigate) {
     if (data.nerveDiceCurrent === undefined) data.nerveDiceCurrent = nd.count;
   }
 
-  // ── Realtime sync ────────────────────────────────────────────────────────
-  // Subscribe to changes on this character row so DM edits (HP, conditions,
-  // admin changes) appear live on the player's screen and vice versa.
-  const realtimeChannel = supabase
-    .channel('character-' + characterId)
-    .on(
-      'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'characters', filter: `id=eq.${characterId}` },
-      (payload) => {
-        // Ignore updates we ourselves just triggered (auto-save sends them back)
-        // by comparing updated_at — if it's within 2s of our last save, skip.
-        const incomingUpdatedAt = new Date(payload.new.updated_at).getTime();
-        const now = Date.now();
-        if (now - incomingUpdatedAt < 2000 && saveTimer === null) return;
-
-        // Merge incoming data — remote wins for everything except active UI state
-        // that the player is currently interacting with (notes textarea etc.)
-        const remote = payload.new;
-        char.name    = remote.name;
-        char.level   = remote.level;
-        char.class_id = remote.class_id;
-        Object.assign(data, remote.data);
-        derived = deriveStats(buildCharacterForCalc());
-        renderSheetUI();
-      }
-    )
-    .subscribe();
-
-  // Clean up subscription when navigating away
-  window._hbsRealtimeChannel = realtimeChannel;
-
+  // Render immediately — don't let realtime setup delay the sheet
   renderSheetUI();
+
+  // ── Realtime sync (non-blocking) ─────────────────────────────────────────
+  // Set up after initial render so it never delays page load.
+  // Requires the Realtime extension to be enabled in Supabase dashboard
+  // (Database → Replication → supabase_realtime publication → characters table).
+  try {
+    if (window._hbsRealtimeChannel) {
+      window._hbsRealtimeChannel.unsubscribe();
+      window._hbsRealtimeChannel = null;
+    }
+    const realtimeChannel = supabase
+      .channel('character-' + characterId)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'characters', filter: `id=eq.${characterId}` },
+        (payload) => {
+          try {
+            const incomingUpdatedAt = new Date(payload.new.updated_at).getTime();
+            const now = Date.now();
+            // Skip if we triggered this save ourselves (within last 3s)
+            if (now - incomingUpdatedAt < 3000) return;
+            const remote = payload.new;
+            char.name     = remote.name;
+            char.level    = remote.level;
+            char.class_id = remote.class_id;
+            Object.assign(data, remote.data);
+            derived = deriveStats(buildCharacterForCalc());
+            renderSheetUI();
+          } catch (e) {
+            console.warn('[HBS] Realtime update error:', e);
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR') {
+          console.warn('[HBS] Realtime subscription failed — live sync unavailable. Enable the Realtime extension in Supabase.');
+        }
+      });
+    window._hbsRealtimeChannel = realtimeChannel;
+  } catch (e) {
+    console.warn('[HBS] Realtime unavailable:', e);
+  }
 }
 
 function renderSheetUI() {
