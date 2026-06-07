@@ -57,7 +57,15 @@ async function render() {
   renderExtensionBanner();
 
   // Wire nav buttons
+  function cleanupSheet() {
+    if (window._hbsRealtimeChannel) {
+      window._hbsRealtimeChannel.unsubscribe();
+      window._hbsRealtimeChannel = null;
+    }
+  }
+
   document.getElementById('nav-chars')?.addEventListener('click', () => {
+    cleanupSheet();
     appState.playerViewActive = false;
     navigate('characters');
   });
