@@ -62,7 +62,7 @@ const SUBSPECIES = {
     ]},
     'rock-gnome': { label: 'Rock Gnome', bonuses: { constitution: 1 }, traits: [
       { name: "Artificer's Lore", description: 'Whenever you make a History check related to magical, alchemical, or technological items, double your proficiency bonus.' },
-      { name: 'Tinker', description: 'Proficiency with artisan tools (tinker's tools). You can spend 1 hour and 10gp to construct a Tiny clockwork device (AC 5, 1 HP).' },
+      { name: 'Tinker', description: "Proficiency with artisan tools (tinker's tools). You can spend 1 hour and 10gp to construct a Tiny clockwork device (AC 5, 1 HP)." },
     ]},
   },
 };
