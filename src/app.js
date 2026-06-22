@@ -97,10 +97,11 @@ async function render() {
     case 'characters':
       await renderCharacterList(content, appState.session.user.id, navigate);
       break;
-    case 'sheet':
+    case 'sheet': {
       const { renderSheet } = await import('./pages/sheet.js');
       await renderSheet(content, appState.currentCharacterId, appState.session.user.id, appState.userIsDM && !appState.playerViewActive, navigate);
       break;
+    }
     case 'new-character':
       await renderCharacterCreation(content, appState.session.user.id, navigate);
       break;
