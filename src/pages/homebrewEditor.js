@@ -44,7 +44,7 @@ export async function renderHomebrewEditor(container) {
   }
 
   // ── Effect row renderer ───────────────────────────────────────────────────
-  function renderEffectRow(effect, idx) {
+  function renderEffectRow(effect, idx, _ti, _ei, _si, _sti) {
     const typeSelect = `
       <select class="form-select eff-type" data-idx="${idx}" style="flex:0 0 auto; width:auto;">
         ${EFFECT_TYPES.map(e => `<option value="${e.value}" ${effect.type === e.value ? 'selected' : ''}>${e.label}</option>`).join('')}
@@ -213,22 +213,27 @@ export async function renderHomebrewEditor(container) {
               </select>
             </div>
           </div>
-          <div style="margin-top:0.75rem;">
+
+          <!-- Named species traits (name + description + their own mechanical effects) -->
+          <div style="margin-top:1rem;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
+              <div class="card-title" style="margin:0;">Species traits</div>
+              <button class="btn btn-sm" id="add-species-trait">+ Add trait</button>
+            </div>
+            <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:0.5rem;">Each trait has a name, description shown on the sheet, and optional mechanical effects applied automatically.</p>
+            <div id="species-trait-list">
+              ${renderSpeciesTraitList(item.data.speciesTraits || [])}
+            </div>
+          </div>
+
+          <!-- Subspecies -->
+          <div style="margin-top:1rem;">
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
               <div class="card-title" style="margin:0;">Subspecies (optional)</div>
               <button class="btn btn-sm" id="add-subspecies">+ Add subspecies</button>
             </div>
             <div id="subspecies-list">
-              ${(item.data.subspecies || []).map((sub, si) => `
-                <div style="border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem 0.75rem; margin-bottom:0.5rem; background:var(--bg-raised);">
-                  <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.4rem;">
-                    <input class="form-input sub-name" data-si="${si}" value="${sub.name || ''}" placeholder="Subspecies name (e.g. Hill Dwarf)" style="flex:1;" />
-                    <button class="btn btn-sm btn-danger sub-remove" data-si="${si}">✕</button>
-                  </div>
-                  <textarea class="form-textarea sub-traits" data-si="${si}" placeholder="Traits description (one per line, or comma-separated)" style="font-size:0.82rem; min-height:60px;">${sub.traits || ''}</textarea>
-                </div>
-              `).join('')}
-              ${!(item.data.subspecies?.length) ? '<div style="color:var(--text-muted); font-size:0.85rem;">No subspecies defined. This species will have no subspecies picker.</div>' : ''}
+              ${renderSubspeciesList(item.data.subspecies || [])}
             </div>
           </div>` : ''}
 
@@ -327,54 +332,242 @@ export async function renderHomebrewEditor(container) {
       </div>`;
   }
 
-  // ── Subspecies wiring ────────────────────────────────────────────────────
+  // ── Species trait rendering helpers ───────────────────────────────────────
+  function renderSpeciesTraitList(traits) {
+    if (!traits.length) return '<div style="color:var(--text-muted); font-size:0.85rem;">No traits yet. Add one above.</div>';
+    return traits.map((t, ti) => `
+      <div class="effect-row st-row" data-ti="${ti}" style="flex-direction:column; border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem 0.75rem; margin-bottom:0.5rem; background:var(--bg-raised);">
+        <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.4rem;">
+          <input class="form-input st-name" data-ti="${ti}" value="${t.name || ''}" placeholder="Trait name (e.g. Darkvision)" style="flex:1; font-weight:500;" />
+          <button class="btn btn-sm btn-danger st-remove" data-ti="${ti}">✕</button>
+        </div>
+        <textarea class="form-textarea st-desc" data-ti="${ti}" placeholder="Description shown on the character sheet…" style="font-size:0.82rem; min-height:55px; margin-bottom:0.5rem;">${t.description || ''}</textarea>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.35rem; font-family:var(--font-display); letter-spacing:0.05em; text-transform:uppercase;">Mechanical effects (optional)</div>
+        <div class="st-effects-list" data-ti="${ti}">
+          ${(t.effects || []).map((e, ei) => renderEffectRow(e, 0, ti, ei)).join('')}
+        </div>
+        <button class="btn btn-sm st-add-effect" data-ti="${ti}" style="margin-top:0.35rem; align-self:flex-start;">+ Add effect</button>
+      </div>
+    `).join('');
+  }
+
+  function renderSubspeciesList(subs) {
+    if (!subs.length) return '<div style="color:var(--text-muted); font-size:0.85rem;">No subspecies defined. This species will have no subspecies picker.</div>';
+    return subs.map((sub, si) => `
+      <div style="border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem 0.75rem; margin-bottom:0.5rem; background:var(--bg-raised);">
+        <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.5rem;">
+          <input class="form-input sub-name" data-si="${si}" value="${sub.name || ''}" placeholder="Subspecies name (e.g. Hill Dwarf)" style="flex:1; font-weight:500;" />
+          <button class="btn btn-sm btn-danger sub-remove" data-si="${si}">✕</button>
+        </div>
+        <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.4rem; font-family:var(--font-display); letter-spacing:0.05em; text-transform:uppercase;">Subspecies traits</div>
+        <div class="sub-traits-list" data-si="${si}">
+          ${(sub.traits || []).map((t, sti) => `
+            <div class="sub-trait-row" data-si="${si}" data-sti="${sti}" style="border:1px solid rgba(255,255,255,0.06); border-radius:var(--radius); padding:0.5rem 0.6rem; margin-bottom:0.4rem; background:rgba(0,0,0,0.15);">
+              <div style="display:flex; gap:0.4rem; align-items:center; margin-bottom:0.3rem;">
+                <input class="form-input sub-trait-name" data-si="${si}" data-sti="${sti}" value="${t.name || ''}" placeholder="Trait name" style="flex:1; font-size:0.88rem;" />
+                <button class="btn btn-sm btn-danger sub-trait-remove" data-si="${si}" data-sti="${sti}">✕</button>
+              </div>
+              <textarea class="form-textarea sub-trait-desc" data-si="${si}" data-sti="${sti}" placeholder="Trait description…" style="font-size:0.8rem; min-height:45px; margin-bottom:0.3rem;">${t.description || ''}</textarea>
+              <div style="font-size:0.72rem; color:var(--text-muted); margin-bottom:0.25rem; font-family:var(--font-display); letter-spacing:0.05em; text-transform:uppercase;">Mechanical effects</div>
+              <div class="sub-eff-list" data-si="${si}" data-sti="${sti}">
+                ${(t.effects || []).map((e, ei) => renderEffectRow(e, 0, 0, ei, si, sti)).join('')}
+              </div>
+              <button class="btn btn-sm sub-add-effect" data-si="${si}" data-sti="${sti}" style="margin-top:0.25rem; align-self:flex-start; font-size:0.78rem;">+ Add effect</button>
+            </div>
+          `).join('')}
+        </div>
+        <button class="btn btn-sm sub-add-trait" data-si="${si}" style="margin-top:0.35rem; font-size:0.82rem;">+ Add trait</button>
+      </div>
+    `).join('');
+  }
+
+  // ── Species & subspecies wiring ───────────────────────────────────────────
   function wireSubspecies(item) {
     if (!item.data) return;
 
-    function rerender() {
+    function rerenderTraits() {
+      const list = document.getElementById('species-trait-list');
+      if (list) list.innerHTML = renderSpeciesTraitList(item.data.speciesTraits || []);
+      wireSpeciesTraitEvents();
+    }
+    function rerenderSubs() {
       const list = document.getElementById('subspecies-list');
-      if (!list) return;
-      list.innerHTML = (item.data.subspecies || []).map((sub, si) => `
-        <div style="border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem 0.75rem; margin-bottom:0.5rem; background:var(--bg-raised);">
-          <div style="display:flex; gap:0.5rem; align-items:center; margin-bottom:0.4rem;">
-            <input class="form-input sub-name" data-si="${si}" value="${sub.name || ''}" placeholder="Subspecies name (e.g. Hill Dwarf)" style="flex:1;" />
-            <button class="btn btn-sm btn-danger sub-remove" data-si="${si}">✕</button>
-          </div>
-          <textarea class="form-textarea sub-traits" data-si="${si}" placeholder="Traits (comma-separated)" style="font-size:0.82rem; min-height:60px;">${sub.traits || ''}</textarea>
-        </div>
-      `).join('') || '<div style="color:var(--text-muted); font-size:0.85rem;">No subspecies defined.</div>';
-      wireRowEvents();
+      if (list) list.innerHTML = renderSubspeciesList(item.data.subspecies || []);
+      wireSubspeciesEvents();
     }
 
-    function wireRowEvents() {
+    function wireSpeciesTraitEvents() {
+      document.querySelectorAll('.st-name').forEach(input => {
+        input.addEventListener('input', () => {
+          const ti = parseInt(input.dataset.ti);
+          item.data.speciesTraits = item.data.speciesTraits || [];
+          item.data.speciesTraits[ti] = item.data.speciesTraits[ti] || {};
+          item.data.speciesTraits[ti].name = input.value;
+        });
+      });
+      document.querySelectorAll('.st-desc').forEach(ta => {
+        ta.addEventListener('input', () => {
+          const ti = parseInt(ta.dataset.ti);
+          item.data.speciesTraits[ti] = item.data.speciesTraits[ti] || {};
+          item.data.speciesTraits[ti].description = ta.value;
+        });
+      });
+      document.querySelectorAll('.st-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+          item.data.speciesTraits.splice(parseInt(btn.dataset.ti), 1);
+          rerenderTraits();
+        });
+      });
+      document.querySelectorAll('.st-add-effect').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const ti = parseInt(btn.dataset.ti);
+          item.data.speciesTraits[ti].effects = item.data.speciesTraits[ti].effects || [];
+          item.data.speciesTraits[ti].effects.push({ type: 'passive', description: '' });
+          rerenderTraits();
+        });
+      });
+      // Wire effect rows inside each species trait
+      document.querySelectorAll('.st-effects-list').forEach(container => {
+        const ti = parseInt(container.dataset.ti);
+        wireNestedEffectRows(
+          container,
+          () => (item.data.speciesTraits[ti].effects = item.data.speciesTraits[ti].effects || []),
+          rerenderTraits
+        );
+      });
+    }
+
+    function wireSubspeciesEvents() {
       document.querySelectorAll('.sub-name').forEach(input => {
         input.addEventListener('input', () => {
           const si = parseInt(input.dataset.si);
+          item.data.subspecies[si] = item.data.subspecies[si] || {};
           item.data.subspecies[si].name = input.value;
         });
       });
-      document.querySelectorAll('.sub-traits').forEach(ta => {
-        ta.addEventListener('input', () => {
-          const si = parseInt(ta.dataset.si);
-          item.data.subspecies[si].traits = ta.value;
+      document.querySelectorAll('.sub-add-trait').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const si = parseInt(btn.dataset.si);
+          item.data.subspecies[si].traits = item.data.subspecies[si].traits || [];
+          item.data.subspecies[si].traits.push({ name: '', description: '', effects: [] });
+          rerenderSubs();
         });
+      });
+      document.querySelectorAll('.sub-trait-name').forEach(input => {
+        input.addEventListener('input', () => {
+          const si = parseInt(input.dataset.si); const sti = parseInt(input.dataset.sti);
+          item.data.subspecies[si].traits[sti].name = input.value;
+        });
+      });
+      document.querySelectorAll('.sub-trait-desc').forEach(ta => {
+        ta.addEventListener('input', () => {
+          const si = parseInt(ta.dataset.si); const sti = parseInt(ta.dataset.sti);
+          item.data.subspecies[si].traits[sti].description = ta.value;
+        });
+      });
+      document.querySelectorAll('.sub-trait-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const si = parseInt(btn.dataset.si); const sti = parseInt(btn.dataset.sti);
+          item.data.subspecies[si].traits.splice(sti, 1);
+          rerenderSubs();
+        });
+      });
+      document.querySelectorAll('.sub-add-effect').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const si = parseInt(btn.dataset.si); const sti = parseInt(btn.dataset.sti);
+          item.data.subspecies[si].traits[sti].effects = item.data.subspecies[si].traits[sti].effects || [];
+          item.data.subspecies[si].traits[sti].effects.push({ type: 'passive', description: '' });
+          rerenderSubs();
+        });
+      });
+      // Wire effect rows inside subspecies traits
+      document.querySelectorAll('.sub-eff-list').forEach(container => {
+        const si = parseInt(container.dataset.si);
+        const sti = parseInt(container.dataset.sti);
+        wireNestedEffectRows(
+          container,
+          () => (item.data.subspecies[si].traits[sti].effects = item.data.subspecies[si].traits[sti].effects || []),
+          rerenderSubs
+        );
       });
       document.querySelectorAll('.sub-remove').forEach(btn => {
         btn.addEventListener('click', () => {
-          const si = parseInt(btn.dataset.si);
-          item.data.subspecies.splice(si, 1);
-          rerender();
+          item.data.subspecies.splice(parseInt(btn.dataset.si), 1);
+          rerenderSubs();
         });
       });
     }
 
-    document.getElementById('add-subspecies')?.addEventListener('click', () => {
-      item.data.subspecies = item.data.subspecies || [];
-      item.data.subspecies.push({ name: '', traits: '' });
-      rerender();
+    // Species trait add button
+    document.getElementById('add-species-trait')?.addEventListener('click', () => {
+      item.data.speciesTraits = item.data.speciesTraits || [];
+      item.data.speciesTraits.push({ name: '', description: '', effects: [] });
+      rerenderTraits();
     });
 
-    wireRowEvents();
+    // Subspecies add button
+    document.getElementById('add-subspecies')?.addEventListener('click', () => {
+      item.data.subspecies = item.data.subspecies || [];
+      item.data.subspecies.push({ name: '', traits: [] });
+      rerenderSubs();
+    });
+
+    wireSpeciesTraitEvents();
+    wireSubspeciesEvents();
+  }
+
+  // Wire effect rows within a container for nested trait effects
+  // getEffectsArray: function that returns the effects array to mutate
+  // rerender: function to call after changes
+  function wireNestedEffectRows(container, getEffectsArray, rerender) {
+    container.querySelectorAll('.eff-type').forEach(sel => {
+      sel.addEventListener('change', e => {
+        const idx = parseInt(e.target.dataset.idx);
+        const effects = getEffectsArray();
+        const oldEff = effects[idx];
+        effects[idx] = {
+          type: e.target.value,
+          ...(PLAYER_CHOICE_POOLS[e.target.value] && oldEff.playerChoice
+            ? { playerChoice: true, allowedChoices: [] } : {}),
+        };
+        rerender();
+      });
+    });
+    container.querySelectorAll('.eff-detail').forEach(input => {
+      input.addEventListener('change', e => {
+        const idx = parseInt(e.target.dataset.idx);
+        const key = e.target.dataset.key;
+        const effects = getEffectsArray();
+        effects[idx][key] = input.type === 'number' ? (parseInt(input.value) || 0) : input.value;
+      });
+    });
+    container.querySelectorAll('.eff-player-choice').forEach(cb => {
+      cb.addEventListener('change', e => {
+        const idx = parseInt(e.target.dataset.idx);
+        const effects = getEffectsArray();
+        effects[idx].playerChoice = cb.checked;
+        if (!cb.checked) effects[idx].allowedChoices = [];
+        rerender();
+      });
+    });
+    container.querySelectorAll('.eff-restriction').forEach(cb => {
+      cb.addEventListener('change', e => {
+        const idx = parseInt(e.target.dataset.idx);
+        const effects = getEffectsArray();
+        const val = cb.value;
+        const current = effects[idx].allowedChoices || [];
+        effects[idx].allowedChoices = cb.checked
+          ? [...current.filter(v => v !== val), val]
+          : current.filter(v => v !== val);
+      });
+    });
+    container.querySelectorAll('.eff-remove').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const idx = parseInt(e.target.dataset.idx);
+        getEffectsArray().splice(idx, 1);
+        rerender();
+      });
+    });
   }
 
   // ── Effect wiring ─────────────────────────────────────────────────────────
