@@ -1,6 +1,8 @@
 import { saveCharacter, getAllHomebrew } from '../lib/db.js';
 import { OUTLAW } from '../lib/classes/outlaw.js';
 import { MUTATOR } from '../lib/classes/mutator.js';
+// Helper to get class definition by ID
+function getClassDef(classId) { return classId === 'mutator' ? MUTATOR : OUTLAW; }
 import { maxHP } from '../lib/calculations.js';
 
 const CLASSES = [
@@ -119,7 +121,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
   ];
 
   let step = 1;
-  const totalSteps = 5;
+  const totalSteps = 6;
   const draft = {
     name: '',
     classId: 'outlaw',
@@ -136,6 +138,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
     currentHP: null,
     maxHPOverride: null,
     notes: '',
+    equipmentChoices: {}, // keyed by choice.id → option.id
   };
 
   function renderStep() {
@@ -370,6 +373,42 @@ export async function renderCharacterCreation(container, userId, navigate) {
     }
 
     if (step === 5) {
+      const cls = getClassDef(draft.classId);
+      const eq = cls.startingEquipment;
+      html += `<div class="card"><div class="card-title">Starting equipment</div>`;
+      if (eq?.fixed?.length) {
+        html += `<div style="margin-bottom:0.75rem;">
+          <div style="font-family:var(--font-display); font-size:0.7rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.4rem;">You always receive</div>
+          <ul style="margin:0; padding-left:1.25rem; font-size:0.9rem; color:var(--text-dim); line-height:1.8;">
+            ${eq.fixed.map(i => `<li>${i.quantity > 1 ? i.quantity + '× ' : ''}${i.name}</li>`).join('')}
+          </ul>
+        </div>`;
+      }
+      if (eq?.choices?.length) {
+        eq.choices.forEach(choice => {
+          const picked = draft.equipmentChoices[choice.id] || '';
+          html += `<div style="margin-bottom:1rem;">
+            <div style="font-family:var(--font-display); font-size:0.7rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.4rem;">${choice.label}</div>
+            <div style="display:flex; flex-direction:column; gap:0.4rem;">
+              ${choice.options.map(opt => `
+                <label style="display:flex; gap:0.75rem; align-items:flex-start; padding:0.6rem 0.75rem;
+                  border:1px solid ${picked===opt.id?'var(--gold-dim)':'var(--border)'};
+                  border-radius:var(--radius); background:${picked===opt.id?'var(--gold-glow)':'var(--bg-raised)'}; cursor:pointer;">
+                  <input type="radio" name="eq-${choice.id}" value="${opt.id}" ${picked===opt.id?'checked':''} style="margin-top:0.2rem;" />
+                  <span style="font-size:0.9rem;">${opt.label}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>`;
+        });
+      }
+      if (!eq) {
+        html += `<p style="font-size:0.9rem; color:var(--text-dim);">This class has no defined starting equipment. Add items manually after creation via the Inventory tab.</p>`;
+      }
+      html += `</div>`;
+    }
+
+    if (step === 6) {
       const hp = maxHP({ level: draft.level, abilities: draft.abilities, classId: draft.classId });
       html += `
         <div class="card">
@@ -394,7 +433,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
             <div><strong style="color:var(--text)">Name:</strong> ${draft.name || '—'}</div>
             <div><strong style="color:var(--text)">Class:</strong> ${draft.classId}</div>
             <div><strong style="color:var(--text)">Level:</strong> ${draft.level}</div>
-            <div><strong style="color:var(--text)">Archetype:</strong> ${draft.archetypeId || '—'}</div>
+            <div><strong style="color:var(--text)">Archetype/Evolution:</strong> ${draft.archetypeId || draft.evolutionId || '—'}</div>
             <div><strong style="color:var(--text)">Species:</strong> ${draft.speciesId || '—'}</div>
             <div><strong style="color:var(--text)">Background:</strong> ${draft.backgroundId || '—'}</div>
           </div>
@@ -489,6 +528,18 @@ export async function renderCharacterCreation(container, userId, navigate) {
       });
     }
     if (step === 5) {
+      const cls5 = getClassDef(draft.classId);
+      (cls5.startingEquipment?.choices || []).forEach(choice => {
+        document.querySelectorAll(`input[name="eq-${choice.id}"]`).forEach(r => {
+          r.addEventListener('change', e => {
+            draft.equipmentChoices[choice.id] = e.target.value;
+            renderStep();
+          });
+        });
+      });
+    }
+
+    if (step === 6) {
       document.getElementById('f-hp')?.addEventListener('input', e => {
         draft.maxHPOverride = e.target.value ? parseInt(e.target.value) : null;
       });
@@ -635,6 +686,49 @@ export async function renderCharacterCreation(container, userId, navigate) {
       }
 
       const classHitDie = draft.classId === 'mutator' ? MUTATOR.hitDie : (OUTLAW.hitDie || 10);
+      // Build starting inventory from equipment choices
+      const startingInventory = [];
+      const classDef = getClassDef(draft.classId);
+      const eqDef = classDef.startingEquipment;
+      if (eqDef) {
+        // Fixed items
+        (eqDef.fixed || []).forEach(item => {
+          for (let q = 0; q < (item.quantity || 1); q++) {
+            startingInventory.push({
+              id: crypto.randomUUID(),
+              name: item.name,
+              damage: item.damage || null,
+              damageType: item.damageType || null,
+              weaponType: item.weaponType || null,
+              baseAC: item.baseAC || null,
+              armorType: item.armorType || null,
+              quantity: 1,
+              equipped: false,
+            });
+          }
+        });
+        // Chosen items
+        (eqDef.choices || []).forEach(choice => {
+          const pickedId = draft.equipmentChoices[choice.id];
+          const opt = choice.options.find(o => o.id === pickedId) || choice.options[0];
+          (opt?.items || []).forEach(item => {
+            for (let q = 0; q < (item.quantity || 1); q++) {
+              startingInventory.push({
+                id: crypto.randomUUID(),
+                name: item.name,
+                damage: item.damage || null,
+                damageType: item.damageType || null,
+                weaponType: item.weaponType || null,
+                baseAC: item.baseAC || null,
+                armorType: item.armorType || null,
+                quantity: 1,
+                equipped: false,
+              });
+            }
+          });
+        });
+      }
+
       const hp = draft.maxHPOverride || maxHP({ level: draft.level, abilities: finalAbilities, classId: draft.classId, classHitDie });
       const archObj = draft.classId === 'outlaw' && draft.archetypeId ? OUTLAW.archetypes[draft.archetypeId] : null;
       const evoObj  = draft.classId === 'mutator' && draft.evolutionId ? MUTATOR.evolutions[draft.evolutionId] : null;
@@ -668,7 +762,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
           spellSlotsUsed: {},
           conditions: [],
           deathSaves: { successes: 0, failures: 0 },
-          inventory: [],
+          inventory: startingInventory,
           equippedArmorId: null,
           equippedShieldId: null,
           feats: [],
