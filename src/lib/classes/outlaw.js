@@ -12,6 +12,48 @@ export const OUTLAW = {
     options: ['Acrobatics','Athletics','Deception','History','Insight','Investigation','Perception','Persuasion','Sleight of Hand','Stealth','Survival'],
   },
   spellcasting: false,
+  startingEquipment: {
+    choices: [
+      {
+        id: 'weapons',
+        label: 'Weapon loadout',
+        options: [
+          { id: 'a', label: 'A) Two firearms of your choice + 40 bullets', items: [
+            { name: 'Firearm (your choice)', quantity: 2, damage: '1d8', damageType: 'Piercing', weaponType: 'firearm' },
+            { name: 'Bullets', quantity: 40 },
+          ]},
+          { id: 'b', label: 'B) One firearm of your choice + a shortsword + 20 bullets', items: [
+            { name: 'Firearm (your choice)', quantity: 1, damage: '1d8', damageType: 'Piercing', weaponType: 'firearm' },
+            { name: 'Shortsword', quantity: 1, damage: '1d6', damageType: 'Piercing', weaponType: 'melee' },
+            { name: 'Bullets', quantity: 20 },
+          ]},
+        ],
+      },
+      {
+        id: 'armour',
+        label: 'Armour',
+        options: [
+          { id: 'a', label: 'A) Leather armour', items: [
+            { name: 'Leather armour', quantity: 1, baseAC: 11, armorType: 'light' },
+          ]},
+          { id: 'b', label: 'B) Scale mail', items: [
+            { name: 'Scale mail', quantity: 1, baseAC: 14, armorType: 'medium' },
+          ]},
+        ],
+      },
+      {
+        id: 'pack',
+        label: 'Adventuring pack',
+        options: [
+          { id: 'a', label: "A) A dungeoneer's pack", items: [{ name: "Dungeoneer's pack", quantity: 1 }] },
+          { id: 'b', label: "B) An explorer's pack",  items: [{ name: "Explorer's pack",  quantity: 1 }] },
+        ],
+      },
+    ],
+    fixed: [
+      { name: "Tinker's tools", quantity: 1 },
+    ],
+  },
 
   // Level-by-level progression table
   progression: [
