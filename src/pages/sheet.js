@@ -124,6 +124,31 @@ export async function renderSheet(container, characterId, uid, dm, navigate) {
   // Render immediately — don't let realtime setup delay the sheet
   renderSheetUI();
 
+  // ── Apply homebrew species named trait effects (once, on load) ──────────
+  // Named traits on homebrew species may have mechanical effects (AC bonus, etc.)
+  // These are applied to data once and flagged so they aren't applied again on reload.
+  const hbSpeciesForEffects = homebrew.find(h =>
+    h.type === 'species' && (`hb_${h.id}` === data.speciesId || h.id === data.speciesId)
+  );
+  if (hbSpeciesForEffects?.data?.speciesTraits?.length && !data._speciesTraitsApplied) {
+    const allTraitEffects = hbSpeciesForEffects.data.speciesTraits.flatMap(t => t.effects || []);
+    if (allTraitEffects.length > 0) {
+      applyFeatEffects(allTraitEffects, {});
+      mutate(() => { data._speciesTraitsApplied = true; });
+    }
+  }
+  // Also apply subspecies named trait effects (homebrew subspecies)
+  if (data.subspeciesId?.startsWith('hb_sub_') && !data._subspeciesTraitsApplied) {
+    const hbSubs = hbSpeciesForEffects?.data?.subspecies || [];
+    const subIdx = parseInt(data.subspeciesId.replace('hb_sub_', ''));
+    const subEntry = hbSubs[subIdx];
+    const subEffects = (subEntry?.traits || []).flatMap(t => t.effects || []);
+    if (subEffects.length > 0) {
+      applyFeatEffects(subEffects, {});
+      mutate(() => { data._subspeciesTraitsApplied = true; });
+    }
+  }
+
   // ── Realtime sync (non-blocking) ─────────────────────────────────────────
   // Set up after initial render so it never delays page load.
   // Requires the Realtime extension to be enabled in Supabase dashboard
@@ -853,6 +878,9 @@ function renderFeaturesTab(tc) {
 
   // 2. Species traits from homebrew species data
   const speciesEntry = homebrew.find(h => h.type === 'species' && (`hb_${h.id}` === data.speciesId || h.id === data.speciesId));
+  // Named traits (new system: name + description + effects per trait)
+  const hbNamedTraits = speciesEntry?.data?.speciesTraits || [];
+  // Legacy: passive/limited-use effects shown as traits (backwards compatible)
   const speciesTraits = speciesEntry?.data?.effects?.filter(e => e.type === 'passive' || e.type === 'limited-use') || [];
 
   // 3. Feats taken (includes ASIs applied as feats)
@@ -900,14 +928,22 @@ function renderFeaturesTab(tc) {
   // Species features
   if (speciesEntry || data.speciesId) {
     const builtinSpeciesTraits = getBuiltinSpeciesTraits(data.speciesId);
-    const subspeciesData = data.subspeciesId && SUBSPECIES_TRAITS[data.speciesId]?.[data.subspeciesId];
-    const subspeciesTraits = subspeciesData?.traits || [];
-    const allTraits = [...builtinSpeciesTraits, ...speciesTraits];
+    // Homebrew subspecies: look up in species entry data (for homebrew species)
+    const hbSubspecies = speciesEntry?.data?.subspecies || [];
+    const hbSubEntry = data.subspeciesId?.startsWith('hb_sub_')
+      ? hbSubspecies[parseInt(data.subspeciesId.replace('hb_sub_', ''))]
+      : null;
+    // Built-in subspecies traits
+    const subspeciesData = !hbSubEntry && data.subspeciesId && SUBSPECIES_TRAITS[data.speciesId]?.[data.subspeciesId];
+    const subspeciesTraits = subspeciesData?.traits || (hbSubEntry?.traits || []);
+    const subspeciesLabel = subspeciesData?.label || hbSubEntry?.name || '';
+
+    const allTraits = [...builtinSpeciesTraits, ...hbNamedTraits, ...speciesTraits];
     if (allTraits.length > 0 || subspeciesTraits.length > 0) {
       const speciesLabel = speciesEntry?.name || data.speciesId || '';
-      const subspeciesLabel = subspeciesData?.label ? ` · ${subspeciesData.label}` : '';
+      const subLabel = subspeciesLabel ? ` · ${subspeciesLabel}` : '';
       html += `<div class="card" style="margin-bottom:1rem;">
-        <div class="card-title">Species traits · ${speciesLabel}${subspeciesLabel}</div>
+        <div class="card-title">Species traits · ${speciesLabel}${subLabel}</div>
         ${allTraits.map(t => `
           <div class="feature-item">
             <div class="feature-name">${t.name || t.abilityName || 'Trait'}</div>
@@ -915,11 +951,11 @@ function renderFeaturesTab(tc) {
           </div>
         `).join('')}
         ${subspeciesTraits.length > 0 ? `
-          <div style="font-family:var(--font-display); font-size:0.62rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin:0.75rem 0 0.4rem;">${subspeciesData.label} traits</div>
+          <div style="font-family:var(--font-display); font-size:0.62rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin:0.75rem 0 0.4rem;">${subspeciesLabel} traits</div>
           ${subspeciesTraits.map(t => `
             <div class="feature-item">
-              <div class="feature-name">${t.name}</div>
-              <div class="feature-desc">${t.description}</div>
+              <div class="feature-name">${typeof t === 'string' ? t : t.name}</div>
+              <div class="feature-desc">${typeof t === 'string' ? '' : (t.description || '')}</div>
             </div>
           `).join('')}` : ''}
       </div>`;
