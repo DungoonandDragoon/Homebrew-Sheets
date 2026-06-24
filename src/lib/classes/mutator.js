@@ -15,6 +15,46 @@ export const MUTATOR = {
     count: 2,
     options: ['Medicine', 'Survival', 'Athletics', 'Investigation'],
   },
+  startingEquipment: {
+    choices: [
+      {
+        id: 'weapons',
+        label: 'Weapon',
+        options: [
+          { id: 'a', label: 'A) Any martial weapon', items: [
+            { name: 'Martial weapon (your choice)', quantity: 1, damage: '1d8', damageType: 'Slashing', weaponType: 'melee' },
+          ]},
+          { id: 'b', label: 'B) Two simple weapons', items: [
+            { name: 'Simple weapon (your choice)', quantity: 2, damage: '1d6', damageType: 'Slashing', weaponType: 'melee' },
+          ]},
+        ],
+      },
+      {
+        id: 'armour',
+        label: 'Armour',
+        options: [
+          { id: 'a', label: 'A) Studded leather armour', items: [
+            { name: 'Studded leather armour', quantity: 1, baseAC: 12, armorType: 'light' },
+          ]},
+          { id: 'b', label: 'B) Scale mail', items: [
+            { name: 'Scale mail', quantity: 1, baseAC: 14, armorType: 'medium' },
+          ]},
+        ],
+      },
+      {
+        id: 'pack',
+        label: 'Pack',
+        options: [
+          { id: 'a', label: "A) A dungeoneer's pack", items: [{ name: "Dungeoneer's pack", quantity: 1 }] },
+          { id: 'b', label: "B) An explorer's pack",  items: [{ name: "Explorer's pack",  quantity: 1 }] },
+        ],
+      },
+    ],
+    fixed: [
+      { name: 'Herbalism kit', quantity: 1 },
+      { name: "Poisoner's kit", quantity: 1 },
+    ],
+  },
 
   // ── Progression table ───────────────────────────────────────────────────────
   // biomass: resource used to activate mutations
