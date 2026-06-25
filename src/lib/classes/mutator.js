@@ -18,41 +18,33 @@ export const MUTATOR = {
   startingEquipment: {
     choices: [
       {
-        id: 'weapons',
+        id: 'weapon',
         label: 'Weapon',
         options: [
-          { id: 'a', label: 'A) Any martial weapon', items: [
-            { name: 'Martial weapon (your choice)', quantity: 1, damage: '1d8', damageType: 'Slashing', weaponType: 'melee' },
-          ]},
-          { id: 'b', label: 'B) Two simple weapons', items: [
-            { name: 'Simple weapon (your choice)', quantity: 2, damage: '1d6', damageType: 'Slashing', weaponType: 'melee' },
-          ]},
+          { id: 'a', label: 'A) Any martial weapon', pickFromCategory: 'martial' },
+          { id: 'b', label: 'B) Two simple weapons', pickFromCategory: 'simple', count: 2 },
         ],
       },
       {
         id: 'armour',
         label: 'Armour',
         options: [
-          { id: 'a', label: 'A) Studded leather armour', items: [
-            { name: 'Studded leather armour', quantity: 1, baseAC: 12, armorType: 'light' },
-          ]},
-          { id: 'b', label: 'B) Scale mail', items: [
-            { name: 'Scale mail', quantity: 1, baseAC: 14, armorType: 'medium' },
-          ]},
+          { id: 'a', label: 'A) Studded leather armor', items: [{ id: 'studdedleather', name: 'Studded leather', quantity: 1, baseAC: 12, armorType: 'light' }] },
+          { id: 'b', label: 'B) Scale mail',            items: [{ id: 'scalemailarmor', name: 'Scale mail',     quantity: 1, baseAC: 14, armorType: 'medium' }] },
         ],
       },
       {
         id: 'pack',
         label: 'Pack',
         options: [
-          { id: 'a', label: "A) A dungeoneer's pack", items: [{ name: "Dungeoneer's pack", quantity: 1 }] },
-          { id: 'b', label: "B) An explorer's pack",  items: [{ name: "Explorer's pack",  quantity: 1 }] },
+          { id: 'a', label: "A) A dungeoneer's pack", items: [{ id: 'dungeoneers', name: "Dungeoneer's pack", quantity: 1, detail: 'Pack' }] },
+          { id: 'b', label: "B) An explorer's pack",  items: [{ id: 'explorers',   name: "Explorer's pack",  quantity: 1, detail: 'Pack' }] },
         ],
       },
     ],
     fixed: [
-      { name: 'Herbalism kit', quantity: 1 },
-      { name: "Poisoner's kit", quantity: 1 },
+      { id: 'herbalism',  name: 'Herbalism kit',  quantity: 1, detail: 'Tool' },
+      { id: 'poisoners',  name: "Poisoner's kit", quantity: 1, detail: 'Tool' },
     ],
   },
 
