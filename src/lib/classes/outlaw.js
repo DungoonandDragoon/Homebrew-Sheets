@@ -15,43 +15,47 @@ export const OUTLAW = {
   startingEquipment: {
     choices: [
       {
-        id: 'weapons',
-        label: 'Weapon loadout',
+        id: 'firearm1',
+        label: 'First firearm',
+        pickFromCategory: 'firearm', // player picks from BUILTIN_ITEMS where weaponType === 'firearm'
+      },
+      {
+        id: 'weapon2',
+        label: 'Second weapon',
         options: [
-          { id: 'a', label: 'A) Two firearms of your choice + 40 bullets', items: [
-            { name: 'Firearm (your choice)', quantity: 2, damage: '1d8', damageType: 'Piercing', weaponType: 'firearm' },
-            { name: 'Bullets', quantity: 40 },
+          { id: 'a', label: 'A) A second firearm', pickFromCategory: 'firearm' },
+          { id: 'b', label: 'B) A shortsword', items: [
+            { id: 'shortsword', name: 'Shortsword', quantity: 1, damage: '1d6', damageType: 'Piercing', weaponType: 'melee' },
           ]},
-          { id: 'b', label: 'B) One firearm of your choice + a shortsword + 20 bullets', items: [
-            { name: 'Firearm (your choice)', quantity: 1, damage: '1d8', damageType: 'Piercing', weaponType: 'firearm' },
-            { name: 'Shortsword', quantity: 1, damage: '1d6', damageType: 'Piercing', weaponType: 'melee' },
-            { name: 'Bullets', quantity: 20 },
-          ]},
+        ],
+      },
+      {
+        id: 'bullets',
+        label: 'Ammunition',
+        options: [
+          { id: 'a', label: 'A) 40 bullets (two firearms)', items: [{ id: 'bullets', name: 'Bullets', quantity: 40, detail: 'Ammunition' }] },
+          { id: 'b', label: 'B) 20 bullets (one firearm)', items: [{ id: 'bullets', name: 'Bullets', quantity: 20, detail: 'Ammunition' }] },
         ],
       },
       {
         id: 'armour',
         label: 'Armour',
         options: [
-          { id: 'a', label: 'A) Leather armour', items: [
-            { name: 'Leather armour', quantity: 1, baseAC: 11, armorType: 'light' },
-          ]},
-          { id: 'b', label: 'B) Scale mail', items: [
-            { name: 'Scale mail', quantity: 1, baseAC: 14, armorType: 'medium' },
-          ]},
+          { id: 'a', label: 'A) Leather armor', items: [{ id: 'leather', name: 'Leather armor', quantity: 1, baseAC: 11, armorType: 'light' }] },
+          { id: 'b', label: 'B) Scale mail',    items: [{ id: 'scalemailarmor', name: 'Scale mail', quantity: 1, baseAC: 14, armorType: 'medium' }] },
         ],
       },
       {
         id: 'pack',
         label: 'Adventuring pack',
         options: [
-          { id: 'a', label: "A) A dungeoneer's pack", items: [{ name: "Dungeoneer's pack", quantity: 1 }] },
-          { id: 'b', label: "B) An explorer's pack",  items: [{ name: "Explorer's pack",  quantity: 1 }] },
+          { id: 'a', label: "A) A dungeoneer's pack", items: [{ id: 'dungeoneers', name: "Dungeoneer's pack", quantity: 1, detail: 'Pack' }] },
+          { id: 'b', label: "B) An explorer's pack",  items: [{ id: 'explorers',   name: "Explorer's pack",  quantity: 1, detail: 'Pack' }] },
         ],
       },
     ],
     fixed: [
-      { name: "Tinker's tools", quantity: 1 },
+      { id: 'tinkers-tools', name: "Tinker's tools", quantity: 1, detail: 'Tool' },
     ],
   },
 
