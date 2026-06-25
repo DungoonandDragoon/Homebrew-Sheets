@@ -281,7 +281,7 @@ export async function renderHomebrewEditor(container) {
               <input class="form-input" type="number" id="hb-dmg-bonus" value="${item.data.damageBonus || 0}" />
             </div>
           </div>
-          <div class="form-row cols-2">
+          <div class="form-row cols-3">
             <div class="form-group">
               <label>Weapon type</label>
               <select class="form-select" id="hb-wpn-type">
@@ -290,8 +290,28 @@ export async function renderHomebrewEditor(container) {
               </select>
             </div>
             <div class="form-group">
+              <label>Weapon category</label>
+              <select class="form-select" id="hb-wpn-cat">
+                <option value="">—</option>
+                ${['simple','martial'].map(c => `<option value="${c}" ${item.data.weaponCategory === c ? 'selected' : ''}>${c.charAt(0).toUpperCase()+c.slice(1)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
               <label>Misfire score (firearms, 0 = none)</label>
               <input class="form-input" type="number" id="hb-misfire" value="${item.data.misfireScore || 0}" />
+            </div>
+          </div>
+          <div class="form-row cols-2">
+            <div class="form-group">
+              <label>Range (e.g. 30/90 or 150/600)</label>
+              <input class="form-input" id="hb-range" value="${item.data.range || ''}" placeholder="e.g. 30/90" />
+            </div>
+            <div class="form-group">
+              <label>Finesse</label>
+              <select class="form-select" id="hb-finesse">
+                <option value="">No</option>
+                <option value="true" ${item.data.finesse ? 'selected' : ''}>Yes</option>
+              </select>
             </div>
           </div>
           <div class="form-row cols-2">
@@ -751,8 +771,11 @@ export async function renderHomebrewEditor(container) {
           item.data.damageType  = document.getElementById('hb-dmg-type')?.value;
           item.data.attackBonus = parseInt(document.getElementById('hb-atk-bonus')?.value) || 0;
           item.data.damageBonus = parseInt(document.getElementById('hb-dmg-bonus')?.value) || 0;
-          item.data.weaponType  = document.getElementById('hb-wpn-type')?.value;
-          item.data.misfireScore= parseInt(document.getElementById('hb-misfire')?.value) || 0;
+          item.data.weaponType     = document.getElementById('hb-wpn-type')?.value;
+          item.data.weaponCategory = document.getElementById('hb-wpn-cat')?.value;
+          item.data.misfireScore   = parseInt(document.getElementById('hb-misfire')?.value) || 0;
+          item.data.range          = document.getElementById('hb-range')?.value.trim() || null;
+          item.data.finesse        = document.getElementById('hb-finesse')?.value === 'true';
           item.data.baseAC      = parseInt(document.getElementById('hb-base-ac')?.value) || 0;
           item.data.armorType   = document.getElementById('hb-armor-type')?.value;
           item.data.properties  = document.getElementById('hb-props')?.value.split(',').map(s => s.trim()).filter(Boolean) || [];
