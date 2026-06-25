@@ -62,6 +62,7 @@ export async function renderCharacterList(container, userId, navigate) {
     });
 
     container.querySelectorAll('.char-card').forEach(card => {
+      if (!card.dataset.id) return; // skip new-char-card which has no id
       card.addEventListener('click', () => navigate('sheet', { characterId: card.dataset.id }));
     });
 
