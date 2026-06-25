@@ -375,20 +375,79 @@ export async function renderCharacterCreation(container, userId, navigate) {
     if (step === 5) {
       const cls = getClassDef(draft.classId);
       const eq = cls.startingEquipment;
+      draft.equipmentChoices = draft.equipmentChoices || {};
+      draft.weaponPicks = draft.weaponPicks || {};
+
+      // All firearms for pickers
+      const FIREARMS = [
+        { id:'pistol',        name:'Pistol',         damage:'1d10', range:'30/90',   misfire:1 },
+        { id:'musket',        name:'Musket',         damage:'1d12', range:'40/120',  misfire:2 },
+        { id:'blunderbuss',   name:'Blunderbuss',    damage:'2d8',  range:'15/—',    misfire:2 },
+        { id:'pepperbox',     name:'Pepperbox',      damage:'1d10', range:'30/90',   misfire:2 },
+        { id:'dragon-pistol', name:'Dragon pistol',  damage:'1d8',  range:'10/—',    misfire:2 },
+      ];
+      const MARTIAL_MELEE = [
+        { id:'longsword',  name:'Longsword',  damage:'1d8'  },
+        { id:'rapier',     name:'Rapier',     damage:'1d8'  },
+        { id:'greataxe',   name:'Greataxe',   damage:'1d12' },
+        { id:'greatsword', name:'Greatsword', damage:'2d6'  },
+        { id:'longsword',  name:'Warhammer',  damage:'1d8'  },
+        { id:'battleaxe',  name:'Battleaxe',  damage:'1d8'  },
+        { id:'halberd',    name:'Halberd',    damage:'1d10' },
+        { id:'longbow',    name:'Longbow (ranged)', damage:'1d8', range:'150/600' },
+        { id:'hcrossbow',  name:'Hand crossbow',    damage:'1d6', range:'30/120'  },
+      ];
+      const SIMPLE_MELEE = [
+        { id:'dagger',    name:'Dagger',    damage:'1d4' },
+        { id:'handaxe',   name:'Handaxe',   damage:'1d6' },
+        { id:'club',      name:'Club',      damage:'1d4' },
+        { id:'spear',     name:'Spear',     damage:'1d6' },
+        { id:'quarterstaff', name:'Quarterstaff', damage:'1d6' },
+        { id:'shortbow',  name:'Shortbow (ranged)', damage:'1d6', range:'80/320' },
+        { id:'lcrossbow', name:'Light crossbow',    damage:'1d8', range:'80/320' },
+      ];
+
+      function getPool(category) {
+        if (category === 'firearm') return FIREARMS;
+        if (category === 'martial') return MARTIAL_MELEE;
+        if (category === 'simple')  return SIMPLE_MELEE;
+        return [];
+      }
+
       html += `<div class="card"><div class="card-title">Starting equipment</div>`;
+
       if (eq?.fixed?.length) {
-        html += `<div style="margin-bottom:0.75rem;">
-          <div style="font-family:var(--font-display); font-size:0.7rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.4rem;">You always receive</div>
-          <ul style="margin:0; padding-left:1.25rem; font-size:0.9rem; color:var(--text-dim); line-height:1.8;">
+        html += `<div style="margin-bottom:1rem; padding:0.6rem 0.75rem; background:var(--bg-raised); border-radius:var(--radius);">
+          <div style="font-family:var(--font-display); font-size:0.65rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.4rem;">You always receive</div>
+          <ul style="margin:0; padding-left:1.25rem; font-size:0.9rem; color:var(--text-dim); line-height:1.9;">
             ${eq.fixed.map(i => `<li>${i.quantity > 1 ? i.quantity + '× ' : ''}${i.name}</li>`).join('')}
           </ul>
         </div>`;
       }
+
       if (eq?.choices?.length) {
         eq.choices.forEach(choice => {
+          // Top-level category picker (no options array — just pick from pool)
+          if (choice.pickFromCategory) {
+            const pool = getPool(choice.pickFromCategory);
+            const count = choice.count || 1;
+            const picks = draft.weaponPicks[choice.id] || [];
+            for (let pi = 0; pi < count; pi++) {
+              html += `<div style="margin-bottom:0.75rem;">
+                <div style="font-family:var(--font-display); font-size:0.65rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.35rem;">${choice.label}${count > 1 ? ' ' + (pi+1) : ''}</div>
+                <select class="form-select eq-weapon-pick" data-choice="${choice.id}" data-pick="${pi}">
+                  <option value="">Select ${choice.pickFromCategory} weapon…</option>
+                  ${pool.map(w => `<option value="${w.id}" ${picks[pi]===w.id?'selected':''}>${w.name} (${w.damage}${w.range ? ', '+w.range : ''})</option>`).join('')}
+                </select>
+              </div>`;
+            }
+            return;
+          }
+
+          // Options-based choice (A or B)
           const picked = draft.equipmentChoices[choice.id] || '';
           html += `<div style="margin-bottom:1rem;">
-            <div style="font-family:var(--font-display); font-size:0.7rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.4rem;">${choice.label}</div>
+            <div style="font-family:var(--font-display); font-size:0.65rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.35rem;">${choice.label}</div>
             <div style="display:flex; flex-direction:column; gap:0.4rem;">
               ${choice.options.map(opt => `
                 <label style="display:flex; gap:0.75rem; align-items:flex-start; padding:0.6rem 0.75rem;
@@ -397,13 +456,21 @@ export async function renderCharacterCreation(container, userId, navigate) {
                   <input type="radio" name="eq-${choice.id}" value="${opt.id}" ${picked===opt.id?'checked':''} style="margin-top:0.2rem;" />
                   <span style="font-size:0.9rem;">${opt.label}</span>
                 </label>
+                ${picked===opt.id && opt.pickFromCategory ? `
+                  <div style="padding:0 0.5rem 0.5rem;">
+                    <select class="form-select eq-weapon-pick" data-choice="${choice.id}_${opt.id}" data-pick="0" style="margin-top:0.35rem;">
+                      <option value="">Select ${opt.pickFromCategory} weapon…</option>
+                      ${getPool(opt.pickFromCategory).map(w => `<option value="${w.id}" ${(draft.weaponPicks[choice.id+'_'+opt.id]||[])[0]===w.id?'selected':''}>${w.name} (${w.damage}${w.range?', '+w.range:''})</option>`).join('')}
+                    </select>
+                  </div>` : ''}
               `).join('')}
             </div>
           </div>`;
         });
       }
+
       if (!eq) {
-        html += `<p style="font-size:0.9rem; color:var(--text-dim);">This class has no defined starting equipment. Add items manually after creation via the Inventory tab.</p>`;
+        html += `<p style="font-size:0.9rem; color:var(--text-dim);">No defined starting equipment. Add items via the Inventory tab after creation.</p>`;
       }
       html += `</div>`;
     }
@@ -528,13 +595,22 @@ export async function renderCharacterCreation(container, userId, navigate) {
       });
     }
     if (step === 5) {
-      const cls5 = getClassDef(draft.classId);
-      (cls5.startingEquipment?.choices || []).forEach(choice => {
-        document.querySelectorAll(`input[name="eq-${choice.id}"]`).forEach(r => {
-          r.addEventListener('change', e => {
-            draft.equipmentChoices[choice.id] = e.target.value;
-            renderStep();
-          });
+      // Wire A/B radio choices
+      document.querySelectorAll('input[type="radio"][name^="eq-"]').forEach(r => {
+        r.addEventListener('change', e => {
+          const choiceId = e.target.name.replace('eq-', '');
+          draft.equipmentChoices[choiceId] = e.target.value;
+          renderStep(); // re-render to show/hide sub-pickers
+        });
+      });
+      // Wire weapon category dropdowns
+      document.querySelectorAll('.eq-weapon-pick').forEach(sel => {
+        sel.addEventListener('change', e => {
+          const key = sel.dataset.choice;
+          const pi  = parseInt(sel.dataset.pick);
+          draft.weaponPicks = draft.weaponPicks || {};
+          draft.weaponPicks[key] = draft.weaponPicks[key] || [];
+          draft.weaponPicks[key][pi] = sel.value;
         });
       });
     }
@@ -690,42 +766,94 @@ export async function renderCharacterCreation(container, userId, navigate) {
       const startingInventory = [];
       const classDef = getClassDef(draft.classId);
       const eqDef = classDef.startingEquipment;
+
+      // Weapon lookup tables (mirrors step 5 pools)
+      const EQ_WEAPON_POOLS = {
+        firearm: [
+          { id:'pistol',        name:'Pistol',         damage:'1d10', damageType:'Piercing', weaponType:'firearm',  range:'30/90',   misfire:1 },
+          { id:'musket',        name:'Musket',         damage:'1d12', damageType:'Piercing', weaponType:'firearm',  range:'40/120',  misfire:2 },
+          { id:'blunderbuss',   name:'Blunderbuss',    damage:'2d8',  damageType:'Piercing', weaponType:'firearm',  range:'15/—',    misfire:2 },
+          { id:'pepperbox',     name:'Pepperbox',      damage:'1d10', damageType:'Piercing', weaponType:'firearm',  range:'30/90',   misfire:2 },
+          { id:'dragon-pistol', name:'Dragon pistol',  damage:'1d8',  damageType:'Piercing', weaponType:'firearm',  range:'10/—',    misfire:2 },
+        ],
+        martial: [
+          { id:'longsword',    name:'Longsword',    damage:'1d8',  damageType:'Slashing', weaponType:'melee' },
+          { id:'rapier',       name:'Rapier',       damage:'1d8',  damageType:'Piercing', weaponType:'melee', finesse:true },
+          { id:'greataxe',     name:'Greataxe',     damage:'1d12', damageType:'Slashing', weaponType:'melee' },
+          { id:'greatsword',   name:'Greatsword',   damage:'2d6',  damageType:'Slashing', weaponType:'melee' },
+          { id:'battleaxe',    name:'Battleaxe',    damage:'1d8',  damageType:'Slashing', weaponType:'melee' },
+          { id:'halberd',      name:'Halberd',      damage:'1d10', damageType:'Slashing', weaponType:'melee' },
+          { id:'longbow',      name:'Longbow',      damage:'1d8',  damageType:'Piercing', weaponType:'ranged', range:'150/600' },
+          { id:'hcrossbow',    name:'Hand crossbow',damage:'1d6',  damageType:'Piercing', weaponType:'ranged', range:'30/120'  },
+        ],
+        simple: [
+          { id:'dagger',       name:'Dagger',       damage:'1d4',  damageType:'Piercing', weaponType:'melee', finesse:true },
+          { id:'handaxe',      name:'Handaxe',      damage:'1d6',  damageType:'Slashing', weaponType:'melee' },
+          { id:'club',         name:'Club',         damage:'1d4',  damageType:'Bludgeoning', weaponType:'melee' },
+          { id:'spear',        name:'Spear',        damage:'1d6',  damageType:'Piercing', weaponType:'melee' },
+          { id:'quarterstaff', name:'Quarterstaff', damage:'1d6',  damageType:'Bludgeoning', weaponType:'melee' },
+          { id:'shortbow',     name:'Shortbow',     damage:'1d6',  damageType:'Piercing', weaponType:'ranged', range:'80/320' },
+          { id:'lcrossbow',    name:'Light crossbow',damage:'1d8', damageType:'Piercing', weaponType:'ranged', range:'80/320' },
+        ],
+      };
+
+      function makeInventoryItem(template) {
+        return {
+          id: crypto.randomUUID(),
+          name: template.name,
+          damage: template.damage || null,
+          damageType: template.damageType || null,
+          weaponType: template.weaponType || null,
+          baseAC: template.baseAC || null,
+          armorType: template.armorType || null,
+          isShield: template.isShield || false,
+          range: template.range || null,
+          misfire: template.misfire || null,
+          finesse: template.finesse || false,
+          detail: template.detail || null,
+          quantity: template.quantity || 1,
+          equipped: false,
+        };
+      }
+
       if (eqDef) {
         // Fixed items
         (eqDef.fixed || []).forEach(item => {
-          for (let q = 0; q < (item.quantity || 1); q++) {
-            startingInventory.push({
-              id: crypto.randomUUID(),
-              name: item.name,
-              damage: item.damage || null,
-              damageType: item.damageType || null,
-              weaponType: item.weaponType || null,
-              baseAC: item.baseAC || null,
-              armorType: item.armorType || null,
-              quantity: 1,
-              equipped: false,
-            });
-          }
+          startingInventory.push(makeInventoryItem(item));
         });
+
         // Chosen items
         (eqDef.choices || []).forEach(choice => {
-          const pickedId = draft.equipmentChoices[choice.id];
-          const opt = choice.options.find(o => o.id === pickedId) || choice.options[0];
-          (opt?.items || []).forEach(item => {
-            for (let q = 0; q < (item.quantity || 1); q++) {
-              startingInventory.push({
-                id: crypto.randomUUID(),
-                name: item.name,
-                damage: item.damage || null,
-                damageType: item.damageType || null,
-                weaponType: item.weaponType || null,
-                baseAC: item.baseAC || null,
-                armorType: item.armorType || null,
-                quantity: 1,
-                equipped: false,
-              });
+          if (choice.pickFromCategory) {
+            // Top-level category picker — get selected weapon IDs from weaponPicks
+            const count = choice.count || 1;
+            const picks = (draft.weaponPicks || {})[choice.id] || [];
+            const pool = EQ_WEAPON_POOLS[choice.pickFromCategory] || [];
+            for (let pi = 0; pi < count; pi++) {
+              const template = pool.find(w => w.id === picks[pi]) || pool[0];
+              if (template) startingInventory.push(makeInventoryItem({ ...template, quantity: 1 }));
             }
-          });
+            return;
+          }
+
+          if (!choice.options) return;
+          const pickedOptId = (draft.equipmentChoices || {})[choice.id];
+          const opt = choice.options.find(o => o.id === pickedOptId) || choice.options[0];
+          if (!opt) return;
+
+          if (opt.pickFromCategory) {
+            // Sub-option category picker
+            const key = choice.id + '_' + opt.id;
+            const picks = (draft.weaponPicks || {})[key] || [];
+            const pool = EQ_WEAPON_POOLS[opt.pickFromCategory] || [];
+            const template = pool.find(w => w.id === picks[0]) || pool[0];
+            if (template) startingInventory.push(makeInventoryItem({ ...template, quantity: 1 }));
+          } else {
+            // Fixed items list
+            (opt.items || []).forEach(item => {
+              startingInventory.push(makeInventoryItem(item));
+            });
+          }
         });
       }
 
