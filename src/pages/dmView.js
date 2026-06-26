@@ -17,9 +17,10 @@ export async function renderDMView(container, navigate) {
     const hp = data.currentHP ?? 0;
     const mhp = maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id });
     const pct = Math.max(0, Math.min(100, Math.round(hp / mhp * 100)));
-    const archName = data.archetypeName || data.evolutionName || '';
+    const archName = data.archetypeName || data.evolutionName || data.disciplineName || '';
     const conditions = (data.conditions || []).join(', ') || '—';
     const isMutator = c.class_id === 'mutator';
+    const isHexer   = c.class_id === 'hexer';
     const nd = data.nerveDiceCurrent ?? '?';
     const ndMax = data.nerveDiceMax ?? '?';
     // Mutator resource display
@@ -59,6 +60,18 @@ export async function renderDMView(container, navigate) {
           ${isMutator
             ? `<div>Biomass: ${biomassLeft}/${mutProg?.biomass ?? '?'}</div>
                <div>Bioshocks: ${bioshockLeft}/${mutProg?.bioshocks ?? '?'}</div>`
+            : isHexer
+            ? (() => {
+                const hexerSigils = [
+                  {level:1,s:2},{level:2,s:2},{level:3,s:3},{level:4,s:3},{level:5,s:5},
+                  {level:6,s:5},{level:7,s:5},{level:8,s:6},{level:9,s:6},{level:10,s:6},
+                  {level:11,s:8},{level:12,s:8},{level:13,s:8},{level:14,s:9},{level:15,s:9},
+                  {level:16,s:9},{level:17,s:11},{level:18,s:11},{level:19,s:11},{level:20,s:15},
+                ];
+                const maxSig = hexerSigils.find(r => r.level === c.level)?.s ?? '?';
+                const sigLeft = Math.max(0, (maxSig === '?' ? 0 : maxSig) - (data.sigilsUsed || 0));
+                return `<div>Sigils: ${sigLeft}/${maxSig}</div>`;
+              })()
             : `<div>Nerve: ${nd}/${ndMax}</div>`
           }
         </div>
