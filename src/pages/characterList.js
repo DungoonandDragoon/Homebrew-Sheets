@@ -18,7 +18,7 @@ export async function renderCharacterList(container, userId, navigate) {
       const hp = data.currentHP ?? maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id });
       const mhp = maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id });
       const pct = Math.max(0, Math.min(100, Math.round(hp / mhp * 100)));
-      const subclassName = data.archetypeName || data.evolutionName || '';
+      const subclassName = data.archetypeName || data.evolutionName || data.disciplineName || '';
       return `
         <div class="char-card" data-id="${c.id}">
           <div class="char-card-name">${c.name}</div>
