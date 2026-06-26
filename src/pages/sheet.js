@@ -3,6 +3,7 @@ import { deriveStats, maxHP, getMisfireScore, weaponAttack, shortRestNerveDiceRe
          SKILL_LABELS, SKILL_ABILITY_LABELS, ABILITY_LABELS, CONDITIONS, formatMod } from '../lib/calculations.js';
 import { OUTLAW, getProgression, getUnlockedFeatures, getNerveDice } from '../lib/classes/outlaw.js';
 import { MUTATOR, getMutatorProgression, getMutatorUnlockedFeatures, getAvailableMutations, getMutatorSpellSlots, getMaxActiveMutations } from '../lib/classes/mutator.js';
+import { HEXER, getHexerProgression, getHexerUnlockedFeatures, getAvailableCurses, getCursesKnown, getSigils, getHexerSpellSlots, getMaxCursesPerTarget } from '../lib/classes/hexer.js';
 import { WIZARD_SPELLS } from '../lib/spells.js';
 import { sendRollToDnDBeyond, rollDie, rollDice } from '../app.js';
 
@@ -82,7 +83,7 @@ function buildCharacterForCalc() {
 
 // Returns the hit die size for a given class ID — extend as classes are added
 function getClassHitDie(classId) {
-  const hitDice = { outlaw: 10, mutator: 10 };
+  const hitDice = { outlaw: 10, mutator: 10, hexer: 8 };
   return hitDice[classId] || 10;
 }
 
@@ -202,6 +203,8 @@ function renderSheetUI() {
   const hpClass = hpPct > 50 ? '' : hpPct > 25 ? ' low' : ' critical';
   const prog = char.class_id === 'mutator'
     ? getMutatorProgression(char.level)
+    : char.class_id === 'hexer'
+    ? getHexerProgression(char.level)
     : getProgression(char.level);
   const archObj = char.class_id === 'outlaw' && data.archetypeId
     ? OUTLAW.archetypes[data.archetypeId] : null;
@@ -216,6 +219,8 @@ function renderSheetUI() {
     ...(data.archetypeId === 'gunslinger' && char.level >= 3 ? [{ id:'trickshots', label:'Trick Shots' }] : []),
     ...(char.class_id === 'mutator' ? [{ id:'mutations', label:'Mutations' }] : []),
     ...(char.class_id === 'mutator' && data.evolutionId === 'arcanist' && char.level >= 3 ? [{ id:'mutator-spells', label:'Spells' }] : []),
+    ...(char.class_id === 'hexer' ? [{ id:'curses', label:'Curses' }] : []),
+    ...(char.class_id === 'hexer' && char.level >= 2 ? [{ id:'hexer-spells', label:'Spells' }] : []),
     { id:'notes',    label:'Notes' },
     ...(isDM ? [{ id:'admin', label:'Admin (DM)' }] : []),
   ];
@@ -236,6 +241,7 @@ function renderSheetUI() {
           ${derived.trickShotDC ? `<span class="badge badge-gold">Trick Shot DC ${derived.trickShotDC}</span>` : ''}
           ${derived.mutationSaveDC ? `<span class="badge badge-gold">Mutation DC ${derived.mutationSaveDC}</span>` : ''}
           ${derived.mutatorSpellSaveDC ? `<span class="badge badge-gold">Spell DC ${derived.mutatorSpellSaveDC}</span>` : ''}
+          ${derived.curseSaveDC ? `<span class="badge badge-gold">Curse DC ${derived.curseSaveDC}</span>` : ''}
           ${derived.spellSaveDC ? `<span class="badge badge-gold">Spell DC ${derived.spellSaveDC}</span>` : ''}
         </div>
       </div>
@@ -350,6 +356,12 @@ function renderSheetUI() {
       data.hitDiceUsed = Math.max(0, used - restored);
       if (data.recklessFusillade) data.recklessFusillade.used = 0;
       if (data.legendaryDuel) data.legendaryDuel.used = false;
+      // Hexer: sigils and spell slots reset on long rest
+      if (char.class_id === 'hexer') {
+        data.sigilsUsed = 0;
+        data.hexerSpellSlotsUsed = {};
+        data.arcaneReleaseUsed = 0;
+      }
       // Mutator: bioshocks and spell slots reset on long rest; active mutations drop
       if (char.class_id === 'mutator') {
         data.bioshocksUsed = 0;
@@ -403,6 +415,8 @@ function renderSheetUI() {
   else if (activeTab === 'trickshots') renderTrickShotsTab(tc);
   else if (activeTab === 'mutations') renderMutationsTab(tc);
   else if (activeTab === 'mutator-spells') renderMutatorSpellsTab(tc);
+  else if (activeTab === 'curses') renderCursesTab(tc);
+  else if (activeTab === 'hexer-spells') renderHexerSpellsTab(tc);
   else if (activeTab === 'notes') renderNotesTab(tc);
   else if (activeTab === 'admin') renderAdminTab(tc);
 }
@@ -873,6 +887,8 @@ function renderFeaturesTab(tc) {
   // 1. Class features sorted by level
   const unlocked = (char.class_id === 'mutator'
     ? getMutatorUnlockedFeatures(char.level, data.evolutionId)
+    : char.class_id === 'hexer'
+    ? getHexerUnlockedFeatures(char.level, data.disciplineId)
     : getUnlockedFeatures(char.level, data.archetypeId)
   ).sort((a, b) => a.level - b.level);
 
@@ -1063,6 +1079,11 @@ function renderFeaturesTab(tc) {
     allBaseFeatures = Object.values(MUTATOR.features);
     allArchFeatures = data.evolutionId
       ? Object.values(MUTATOR.evolutions[data.evolutionId]?.features || {})
+      : [];
+  } else if (char.class_id === 'hexer') {
+    allBaseFeatures = Object.values(HEXER.features);
+    allArchFeatures = data.disciplineId
+      ? Object.values(HEXER.disciplines[data.disciplineId]?.features || {})
       : [];
   } else {
     allBaseFeatures = Object.values(OUTLAW.features);
@@ -1932,6 +1953,275 @@ function renderMutationsTab(tc) {
   });
 }
 
+// ── CURSES TAB (Hexer only) ──────────────────────────────────────────────────
+function renderCursesTab(tc) {
+  const prog         = getHexerProgression(char.level);
+  const maxSigils    = prog?.sigils || 2;
+  const sigilsUsed   = data.sigilsUsed || 0;
+  const sigilsLeft   = Math.max(0, maxSigils - sigilsUsed);
+  const maxKnown     = getCursesKnown(char.level);
+  const knownCurses  = data.knownCurses || [];
+  const curseDC      = derived.curseSaveDC || (8 + derived.prof + derived.mods.intelligence);
+  const intMod       = derived.mods.intelligence;
+  const allCurses    = getAvailableCurses();
+  const maxPerTarget = getMaxCursesPerTarget(char.level, intMod, derived.prof);
+  const isHellion    = data.disciplineId === 'hellion';
+  const arcaneReleaseMax = Math.max(1, intMod);
+  const arcaneReleaseUsed = data.arcaneReleaseUsed || 0;
+  const arcaneReleaseLeft = Math.max(0, arcaneReleaseMax - arcaneReleaseUsed);
+
+  let html = `
+    <!-- Sigil pool -->
+    <div class="card" style="margin-bottom:1rem;">
+      <div style="display:flex; gap:2rem; flex-wrap:wrap; align-items:flex-start;">
+        <div>
+          <div class="card-title" style="margin-bottom:0.4rem;">Sigils</div>
+          <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+            ${Array.from({length: maxSigils}, (_, i) => `
+              <div class="nerve-die ${i >= sigilsLeft ? 'spent' : ''} sigil-pip" data-i="${i}"
+                style="cursor:pointer; font-size:0.8rem;" title="${i < sigilsLeft ? 'Click to spend' : 'Spent'}">
+                ${i < sigilsLeft ? 'S' : '·'}
+              </div>`).join('')}
+          </div>
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.3rem;">${sigilsLeft} / ${maxSigils} · Resets on long rest</div>
+        </div>
+        <div>
+          <div class="card-title" style="margin-bottom:0.4rem;">Curse DC</div>
+          <div style="font-family:var(--font-display); font-size:1.4rem;">${curseDC}</div>
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.2rem;">Max curses per target: ${maxPerTarget}</div>
+        </div>
+        ${isHellion ? `<div>
+          <div class="card-title" style="margin-bottom:0.4rem;">Arcane Release</div>
+          <div style="font-family:var(--font-display); font-size:1.2rem;">${arcaneReleaseLeft} / ${arcaneReleaseMax}</div>
+          <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.2rem;">Per short rest</div>
+          <button class="btn btn-sm" id="use-arcane-release" ${arcaneReleaseLeft === 0 ? 'disabled' : ''} style="margin-top:0.35rem;">Roll d10</button>
+        </div>` : ''}
+      </div>
+    </div>
+
+    <!-- Known curses -->
+    <div class="card">
+      <div class="section-header">
+        <div class="card-title" style="margin:0;">Known curses (${knownCurses.length} / ${maxKnown})</div>
+      </div>
+      <p style="font-size:0.82rem; color:var(--text-dim); margin:0.4rem 0 0.75rem;">On a long rest you may swap one known curse for another.</p>
+      <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.25rem;">
+        ${allCurses.map(c => {
+          const isKnown = knownCurses.includes(c.id);
+          const canLearn = isKnown || knownCurses.length < maxKnown;
+          const canAfford = sigilsLeft >= c.sigilCost;
+          return `
+            <div style="border:1px solid ${isKnown ? 'var(--gold-dim)' : 'var(--border)'};
+              border-radius:var(--radius); padding:0.6rem 0.75rem;
+              background:${isKnown ? 'var(--gold-glow)' : 'var(--bg-raised)'};">
+              <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+                <input type="checkbox" class="curse-learn" data-id="${c.id}"
+                  ${isKnown ? 'checked' : ''} ${!canLearn ? 'disabled' : ''} />
+                <div style="flex:1; min-width:0;">
+                  <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                    <span style="font-weight:500;">${c.name}</span>
+                    <span style="font-size:0.75rem; color:var(--text-muted);">${c.sigilCost} Sigil${c.sigilCost !== 1 ? 's' : ''}</span>
+                    <span style="font-size:0.75rem; color:var(--text-muted);">${c.activation}</span>
+                    ${c.saveType ? `<span style="font-size:0.75rem; color:var(--gold);">DC ${curseDC} ${c.saveType} save</span>` : ''}
+                  </div>
+                  <div style="font-size:0.82rem; color:var(--text-dim); margin-top:0.2rem;">${c.description}</div>
+                </div>
+                ${isKnown ? `<button class="btn btn-sm curse-use ${canAfford ? 'btn-gold' : ''}"
+                  data-id="${c.id}" data-cost="${c.sigilCost}"
+                  ${!canAfford ? 'disabled' : ''}>
+                  Use (${c.sigilCost})
+                </button>` : ''}
+              </div>
+            </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- Arcane Release table (Hellion) -->
+    ${isHellion ? `
+    <div class="card" style="margin-top:1rem;">
+      <div class="card-title">Arcane Release — d10 table</div>
+      ${HEXER.arcaneReleaseTable.map(r => `
+        <div style="display:flex; gap:0.75rem; padding:0.35rem 0; border-bottom:1px solid var(--border); font-size:0.82rem;">
+          <div style="font-family:var(--font-display); color:var(--gold); min-width:1.5rem; text-align:center;">${r.roll}</div>
+          <div style="color:var(--text-dim);">${r.effect}</div>
+        </div>
+      `).join('')}
+    </div>` : ''}
+  `;
+
+  tc.innerHTML = html;
+
+  // Sigil pips
+  tc.querySelectorAll('.sigil-pip').forEach(pip => {
+    pip.addEventListener('click', () => {
+      const i = parseInt(pip.dataset.i);
+      const cur = maxSigils - (data.sigilsUsed || 0);
+      mutate(() => {
+        if (i < cur) data.sigilsUsed = (data.sigilsUsed || 0) + 1;
+        else data.sigilsUsed = Math.max(0, (data.sigilsUsed || 0) - 1);
+      });
+    });
+  });
+
+  // Learn/forget curses
+  tc.querySelectorAll('.curse-learn').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const id = cb.dataset.id;
+      mutate(() => {
+        if (cb.checked) {
+          if ((data.knownCurses || []).length < maxKnown) {
+            data.knownCurses = [...(data.knownCurses || []), id];
+          } else { cb.checked = false; }
+        } else {
+          data.knownCurses = (data.knownCurses || []).filter(c => c !== id);
+        }
+      });
+    });
+  });
+
+  // Use curse — spend sigils and send to DnDBeyond
+  tc.querySelectorAll('.curse-use').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const cost = parseInt(btn.dataset.cost);
+      const curse = allCurses.find(c => c.id === btn.dataset.id);
+      mutate(() => { data.sigilsUsed = Math.min(maxSigils, (data.sigilsUsed || 0) + cost); });
+      const msg = curse
+        ? `${curse.name} — ${cost} Sigil${cost !== 1 ? 's' : ''} spent. DC ${curseDC}${curse.saveType ? ' ' + curse.saveType + ' save' : ''}.`
+        : `Curse used — ${cost} Sigil${cost !== 1 ? 's' : ''} spent.`;
+      showMsg(msg);
+    });
+  });
+
+  // Arcane Release roll
+  document.getElementById('use-arcane-release')?.addEventListener('click', () => {
+    const roll = rollDie(10);
+    const result = HEXER.arcaneReleaseTable.find(r => r.roll === roll);
+    mutate(() => { data.arcaneReleaseUsed = Math.min(arcaneReleaseMax, (data.arcaneReleaseUsed || 0) + 1); });
+    sendRollToDnDBeyond('Arcane Release', roll, `d10 → ${result?.effect || roll}`, char.name);
+    showMsg(`Arcane Release: ${roll} — ${result?.effect || ''}`);
+  });
+}
+
+// ── HEXER SPELLS TAB ──────────────────────────────────────────────────────────
+function renderHexerSpellsTab(tc) {
+  const slots = getHexerSpellSlots(char.level);
+  if (!slots) {
+    tc.innerHTML = `<div class="card"><p style="color:var(--text-dim)">Spellcasting unlocks at level 2.</p></div>`;
+    return;
+  }
+
+  const slotsUsed   = data.hexerSpellSlotsUsed || {};
+  const prepared    = data.hexerPreparedSpells  || [];
+  const dc          = derived.hexerSpellSaveDC     || (8 + derived.prof + derived.mods.intelligence);
+  const atk         = derived.hexerSpellAttackBonus || (derived.prof + derived.mods.intelligence);
+  const intMod      = derived.mods.intelligence;
+  const maxPrepared = Math.max(1, intMod + Math.floor(char.level / 2));
+
+  // Build spell pool from Hexer spell list
+  const hexerSpellPool = WIZARD_SPELLS.filter(s => {
+    if (s.level === 0) return false;
+    const spellsAtLevel = HEXER.spellList[s.level] || [];
+    return spellsAtLevel.some(name =>
+      name.toLowerCase().replace(/[^a-z]/g, '') === s.name.toLowerCase().replace(/[^a-z]/g, '')
+    );
+  });
+
+  const slotLevels = [1,2,3,4,5].filter(l => (slots[`s${l}`] || 0) > 0);
+
+  const slotPips = slotLevels.map(l => {
+    const max  = slots[`s${l}`];
+    const used = slotsUsed[l] || 0;
+    return `<div class="slot-group">
+      <div class="slot-label">Level ${l}</div>
+      <div class="slot-pips">
+        ${Array.from({length: max}, (_, i) => `
+          <div class="slot-pip ${i < (max - used) ? 'available' : 'used'}"
+            data-level="${l}" data-i="${i}"></div>
+        `).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  const leveledSpells = hexerSpellPool.filter(s => slotLevels.includes(s.level));
+
+  tc.innerHTML = `
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="card-title">Spell slots</div>
+      <div class="spell-slots">${slotPips}</div>
+      <div style="font-size:0.85rem; color:var(--text-dim);">
+        Spell save DC: <strong>${dc}</strong> · Spell attack: <strong>${formatMod(atk)}</strong>
+        <span style="margin-left:1rem; color:var(--text-muted);">Prepared: ${prepared.length} / ${maxPrepared}</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-header">
+        <div class="card-title" style="margin:0;">Prepared spells (${prepared.length} / ${maxPrepared})</div>
+        <button class="btn btn-sm" id="manage-hexer-spells">Manage</button>
+      </div>
+      ${slotLevels.map(l => {
+        const group = leveledSpells.filter(s => s.level === l && prepared.includes(s.id));
+        if (group.length === 0) return '';
+        return `<div style="margin-bottom:0.75rem;">
+          <div style="font-family:var(--font-display); font-size:0.62rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.25rem;">Level ${l}</div>
+          ${group.map(s => `
+            <div class="spell-row">
+              <div class="spell-name">${s.name} ${s.concentration ? '<span class="spell-conc">C</span>' : ''}</div>
+              <div class="spell-detail">${s.castTime} · ${s.range} · ${s.duration}</div>
+              <button class="btn btn-sm hcast-btn" data-spell="${s.id}" data-level="${s.level}">Cast</button>
+            </div>
+          `).join('')}
+        </div>`;
+      }).join('') || '<div style="color:var(--text-muted); font-size:0.85rem; margin-top:0.5rem;">No spells prepared yet.</div>'}
+    </div>
+    <div class="card" style="margin-top:1rem;">
+      <div class="card-title">Hexer spell list</div>
+      ${[1,2,3,4,5].map(l => {
+        const spells = HEXER.spellList[l] || [];
+        if (!spells.length) return '';
+        return `<div style="margin-bottom:0.6rem;">
+          <div style="font-family:var(--font-display); font-size:0.62rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.2rem;">Level ${l}</div>
+          <div style="font-size:0.82rem; color:var(--text-dim);">${spells.join(', ')}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+
+  // Slot pips
+  tc.querySelectorAll('.slot-pip').forEach(pip => {
+    pip.addEventListener('click', () => {
+      const level = parseInt(pip.dataset.level);
+      const max   = slots[`s${level}`];
+      mutate(() => {
+        const used = (data.hexerSpellSlotsUsed || {})[level] || 0;
+        data.hexerSpellSlotsUsed = { ...(data.hexerSpellSlotsUsed || {}) };
+        data.hexerSpellSlotsUsed[level] = pip.classList.contains('available')
+          ? Math.min(max, used + 1) : Math.max(0, used - 1);
+      });
+    });
+  });
+
+  document.getElementById('manage-hexer-spells')?.addEventListener('click', () => {
+    showSpellPicker(leveledSpells, prepared, -1, maxPrepared, (picked) => {
+      mutate(() => { data.hexerPreparedSpells = picked; });
+    });
+  });
+
+  tc.querySelectorAll('.hcast-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const spell = WIZARD_SPELLS.find(s => s.id === btn.dataset.spell);
+      if (!spell) return;
+      const level = parseInt(btn.dataset.level);
+      const max   = slots[`s${level}`] || 0;
+      mutate(() => {
+        data.hexerSpellSlotsUsed = { ...(data.hexerSpellSlotsUsed || {}) };
+        data.hexerSpellSlotsUsed[level] = Math.min(max, ((data.hexerSpellSlotsUsed || {})[level] || 0) + 1);
+      });
+      showMsg(`Casting ${spell.name} — level ${level} slot used.`);
+    });
+  });
+}
+
 // ── MUTATOR SPELLS TAB (Arcanist evolution only) ───────────────────────────────
 function renderMutatorSpellsTab(tc) {
   const slots = getMutatorSpellSlots(char.level, data.evolutionId);
@@ -2338,6 +2628,9 @@ function showShortRestModal() {
       char.name
     );
     if (char.class_id === 'mutator') mutate(() => { data.biomassUsed = 0; data.activeMutations = []; });
+    if (char.class_id === 'hexer' && data.disciplineId === 'hellion') {
+      mutate(() => { data.arcaneReleaseUsed = 0; });
+    }
     showMsg(`Short rest: spent ${diceToSpend} hit ${diceToSpend === 1 ? 'die' : 'dice'}, healed ${totalHealed} HP.`);
     overlay.remove();
   });
@@ -2347,10 +2640,13 @@ function showShortRestModal() {
       if (ndRecovery > 0) {
         data.nerveDiceCurrent = Math.min(data.nerveDiceMax || char.level, (data.nerveDiceCurrent || 0) + ndRecovery);
       }
-      // Mutator: biomass always resets on short rest
       if (char.class_id === 'mutator') { data.biomassUsed = 0; data.activeMutations = []; }
+      if (char.class_id === 'hexer' && data.disciplineId === 'hellion') { data.arcaneReleaseUsed = 0; }
     });
-    showMsg('Short rest complete.' + (ndRecovery > 0 ? ` Recovered ${ndRecovery} Nerve Dice.` : '') + (char.class_id === 'mutator' ? ' Biomass restored.' : ''));
+    showMsg('Short rest complete.'
+      + (ndRecovery > 0 ? ` Recovered ${ndRecovery} Nerve Dice.` : '')
+      + (char.class_id === 'mutator' ? ' Biomass restored.' : '')
+    );
     overlay.remove();
   });
 }
@@ -2394,6 +2690,24 @@ function showLevelUpModal() {
               <div>
                 <div style="font-size:0.9rem; font-family:var(--font-display); color:var(--gold);">${e.name}</div>
                 <div style="font-size:0.8rem; color:var(--text-dim);">${e.description}</div>
+              </div>
+            </label>
+          `).join('')}
+        </div>
+      </div>`;
+  }
+  if (char.class_id === 'hexer' && newLevel === 3 && !data.disciplineId) {
+    const disciplines = Object.values(HEXER.disciplines);
+    archetypeChoice = `
+      <div style="padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius); margin-bottom:0.75rem;">
+        <strong style="color:var(--gold)">Choose your discipline</strong>
+        <div style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.4rem;">
+          ${disciplines.map(d => `
+            <label style="display:flex; gap:0.5rem; align-items:flex-start; cursor:pointer;">
+              <input type="radio" name="lvlup-discipline" value="${d.id}" style="margin-top:0.2rem;" />
+              <div>
+                <div style="font-size:0.9rem; font-family:var(--font-display); color:var(--gold);">${d.name}</div>
+                <div style="font-size:0.8rem; color:var(--text-dim);">${d.description}</div>
               </div>
             </label>
           `).join('')}
@@ -2537,12 +2851,17 @@ function showLevelUpModal() {
       const chosen = overlay.querySelector('input[name="lvlup-evolution"]:checked')?.value;
       if (!chosen) { confirmBtn.disabled = false; confirmBtn.textContent = 'Level up'; alert('Please choose an evolution.'); return; }
     }
+    if (char.class_id === 'hexer' && newLevel === 3 && !data.disciplineId) {
+      const chosen = overlay.querySelector('input[name="lvlup-discipline"]:checked')?.value;
+      if (!chosen) { confirmBtn.disabled = false; confirmBtn.textContent = 'Level up'; alert('Please choose a discipline.'); return; }
+    }
 
     const hpGained = Math.max(1, parseInt(document.getElementById('lvlup-hp')?.value) || (Math.ceil(10/2)+1));
     const isFeatChoice = document.getElementById('asi-feat-radio')?.checked;
     const chosenFeatId = document.getElementById('asi-feat-picker')?.value;
     const chosenArchetype = overlay.querySelector('input[name="lvlup-archetype"]:checked')?.value;
-    const chosenEvolution = overlay.querySelector('input[name="lvlup-evolution"]:checked')?.value;
+    const chosenEvolution  = overlay.querySelector('input[name="lvlup-evolution"]:checked')?.value;
+    const chosenDiscipline = overlay.querySelector('input[name="lvlup-discipline"]:checked')?.value;
 
     // If the chosen feat has any player-choice effects, prompt for each before applying
     if (isASI && isFeatChoice && chosenFeatId) {
@@ -2612,7 +2931,8 @@ function showLevelUpModal() {
           data.maxHPOverride = null;
           data.nerveDiceCurrent = newProg.nerveDiceCount;
           if (chosenArchetype) { data.archetypeId = chosenArchetype; data.archetypeName = OUTLAW.archetypes[chosenArchetype]?.name || ''; }
-          if (chosenEvolution) { data.evolutionId = chosenEvolution; data.evolutionName = MUTATOR.evolutions[chosenEvolution]?.name || ''; }
+          if (chosenEvolution)  { data.evolutionId  = chosenEvolution;  data.evolutionName  = MUTATOR.evolutions[chosenEvolution]?.name  || ''; }
+          if (chosenDiscipline) { data.disciplineId = chosenDiscipline; data.disciplineName = HEXER.disciplines[chosenDiscipline]?.name || ''; }
           data.feats = data.feats || [];
           if (!data.feats.find(f => f.id === chosenFeatId)) {
             data.feats.push({ id: chosenFeatId, name: feat.name, description: feat.data?.description || '', effects: feat.data?.effects || [] });
