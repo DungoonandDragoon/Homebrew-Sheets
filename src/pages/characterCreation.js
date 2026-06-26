@@ -1,13 +1,19 @@
 import { saveCharacter, getAllHomebrew } from '../lib/db.js';
 import { OUTLAW } from '../lib/classes/outlaw.js';
 import { MUTATOR } from '../lib/classes/mutator.js';
+import { HEXER } from '../lib/classes/hexer.js';
 // Helper to get class definition by ID
-function getClassDef(classId) { return classId === 'mutator' ? MUTATOR : OUTLAW; }
+function getClassDef(classId) {
+  if (classId === 'mutator') return MUTATOR;
+  if (classId === 'hexer')   return HEXER;
+  return OUTLAW;
+}
 import { maxHP } from '../lib/calculations.js';
 
 const CLASSES = [
   { id: 'outlaw',  name: 'Outlaw',  hitDie: 10, description: 'A ranged martial who wins fights through speed, nerve, and precision.' },
   { id: 'mutator', name: 'Mutator', hitDie: 10, description: 'A warrior of flesh and will, bending their own body into living weapons, armor, and tools of survival.' },
+  { id: 'hexer',   name: 'Hexer',   hitDie: 8,  description: 'A master of arcane inscriptions, wielding cursed runes and forbidden sigils to weaken foes and control the battlefield.' },
 ];
 
 // 2014 PHB fixed ability score bonuses per species.
@@ -128,6 +134,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
     level: 3,
     archetypeId: '',
     evolutionId: '',
+    disciplineId: '',
     speciesId: '',
     subspeciesId: '',
     backgroundId: '',
@@ -348,6 +355,31 @@ export async function renderCharacterCreation(container, userId, navigate) {
           </div>
         `;
       }
+
+      if (draft.classId === 'hexer') {
+        const disciplines = Object.values(HEXER.disciplines);
+        html += `
+          <div class="card">
+            <div class="card-title">Hexer discipline</div>
+            ${draft.level >= 3 ? `
+              <p style="font-size:0.9rem; color:var(--text-dim); margin-bottom:1rem;">At level 3, you begin to realize the true potential of your power. Choose your discipline.</p>
+              <div style="display:flex; flex-direction:column; gap:0.75rem;">
+                ${disciplines.map(d => `
+                  <label style="display:flex; gap:0.75rem; align-items:flex-start; cursor:pointer; padding:0.75rem; border:1px solid ${draft.disciplineId===d.id?'var(--gold-dim)':'var(--border)'}; border-radius:var(--radius); background:${draft.disciplineId===d.id?'var(--gold-glow)':'var(--bg-raised)'}; transition:all 0.15s;">
+                    <input type="radio" name="discipline" value="${d.id}" ${draft.disciplineId===d.id?'checked':''} style="margin-top:0.2rem;" />
+                    <div>
+                      <div style="font-family:var(--font-display); font-size:0.85rem; letter-spacing:0.05em; color:var(--gold); margin-bottom:0.25rem;">${d.name}</div>
+                      <div style="font-size:0.85rem; color:var(--text-dim);">${d.description}</div>
+                    </div>
+                  </label>
+                `).join('')}
+              </div>
+            ` : `
+              <p style="font-size:0.9rem; color:var(--text-dim);">Discipline choice unlocks at level 3. You will be prompted to choose when you reach that level.</p>
+            `}
+          </div>
+        `;
+      }
     }
 
     if (step === 4) {
@@ -528,6 +560,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
         draft.classId = e.target.value;
         draft.archetypeId = '';
         draft.evolutionId = '';
+        draft.disciplineId = '';
         draft.skillProficiencies = [];
       });
       document.getElementById('f-level').addEventListener('change', e => { draft.level = parseInt(e.target.value); });
@@ -572,6 +605,9 @@ export async function renderCharacterCreation(container, userId, navigate) {
       });
       document.querySelectorAll('input[name="evolution"]').forEach(r => {
         r.addEventListener('change', e => { draft.evolutionId = e.target.value; renderStep(); });
+      });
+      document.querySelectorAll('input[name="discipline"]').forEach(r => {
+        r.addEventListener('change', e => { draft.disciplineId = e.target.value; renderStep(); });
       });
       document.querySelectorAll('input[name="trick"]').forEach(cb => {
         cb.addEventListener('change', e => {
@@ -647,6 +683,10 @@ export async function renderCharacterCreation(container, userId, navigate) {
       }
       if (draft.classId === 'mutator' && !draft.evolutionId) {
         alert('Please choose an evolution. If starting below level 3, set your level on step 1 first.');
+        return false;
+      }
+      if (draft.classId === 'hexer' && !draft.disciplineId) {
+        alert('Please choose a discipline. If starting below level 3, set your level on step 1 first.');
         return false;
       }
     }
@@ -859,7 +899,9 @@ export async function renderCharacterCreation(container, userId, navigate) {
 
       const hp = draft.maxHPOverride || maxHP({ level: draft.level, abilities: finalAbilities, classId: draft.classId, classHitDie });
       const archObj = draft.classId === 'outlaw' && draft.archetypeId ? OUTLAW.archetypes[draft.archetypeId] : null;
-      const evoObj  = draft.classId === 'mutator' && draft.evolutionId ? MUTATOR.evolutions[draft.evolutionId] : null;
+      const evoObj  = draft.classId === 'mutator' && draft.evolutionId ? MUTATOR.evolutions[draft.evolutionId]
+                    : draft.classId === 'hexer' && draft.disciplineId ? HEXER.disciplines[draft.disciplineId]
+                    : null;
       const ndMax = draft.classId === 'outlaw' && draft.level >= 2
         ? (OUTLAW.progression.find(p => p.level === draft.level)?.nerveDiceCount || 0) : 0;
       const mutProg = draft.classId === 'mutator'
@@ -874,6 +916,8 @@ export async function renderCharacterCreation(container, userId, navigate) {
           archetypeName: archObj?.name || '',
           evolutionId: draft.evolutionId,
           evolutionName: evoObj?.name || '',
+          disciplineId: draft.disciplineId,
+          disciplineName: draft.disciplineId ? (HEXER.disciplines[draft.disciplineId]?.name || '') : '',
           speciesId: draft.speciesId,
           subspeciesId: draft.subspeciesId || null,
           backgroundId: draft.backgroundId,
@@ -881,6 +925,8 @@ export async function renderCharacterCreation(container, userId, navigate) {
           skillProficiencies: draft.skillProficiencies,
           saveProficiencies: draft.classId === 'mutator'
             ? ['constitution','intelligence']
+            : draft.classId === 'hexer'
+            ? ['wisdom','intelligence']
             : draft.saveProficiencies,
           currentHP: draft.currentHP ?? hp,
           maxHPOverride: draft.maxHPOverride,
@@ -898,6 +944,12 @@ export async function renderCharacterCreation(container, userId, navigate) {
           signatureMove: null,
           // Mutator resources
           knownMutations: [],
+          // Hexer resources
+          knownCurses: [],
+          sigilsUsed: 0,
+          hexerSpellSlotsUsed: {},
+          hexerSpellNotes: '',
+          arcaneReleaseUsed: 0,
           activeMutations: [],
           bioshockedMutations: [],
           biomassUsed: 0,
