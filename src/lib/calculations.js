@@ -134,6 +134,16 @@ export function deriveStats(character) {
     }
   }
 
+  // Hexer DCs — Intelligence based
+  let curseSaveDC = null;
+  let hexerSpellSaveDC = null;
+  let hexerSpellAttackBonus = null;
+  if (classId === 'hexer') {
+    curseSaveDC          = 8 + prof + mods.intelligence;
+    hexerSpellSaveDC     = 8 + prof + mods.intelligence;
+    hexerSpellAttackBonus = prof + mods.intelligence;
+  }
+
   // Nerve dice info
   let nerveDice = null;
   if (classId === 'outlaw' && level >= 2) {
@@ -156,6 +166,7 @@ export function deriveStats(character) {
     trickShotDC, calledShotDC, suppressingFireDC, showstopperDC, nerveDice, recklessFusillade,
     speed, damageResistances, conditionImmunities,
     mutationSaveDC, mutatorSpellSaveDC, mutatorSpellAttackBonus,
+    curseSaveDC, hexerSpellSaveDC, hexerSpellAttackBonus,
   };
 }
 
