@@ -214,7 +214,7 @@ export const HEXER = {
           id: 'arcane-release',
           name: 'Arcane Release',
           level: 3,
-          description: 'When inscribing a curse you may choose to release its arcane power fully and roll 1d10, augmenting the curse\'s effect: 1=Eruption (curse fails, both you and target make Dex save or take Xd6 force); 2=Leaping Curse (curse also hits one additional target within 15ft for free); 3=Rejected Host (curse hits a random different creature within 30ft instead); 4=Greed (cost reduced by 1d4 Sigils, minimum 0); 5=Overwhelmed (cost increased by 1d4 Sigils); 6=Intensified (save DC +1 if applicable); 7=Mirrored (you suffer the curse instead of the target); 8=Untethered (curse doesn\'t count toward the target\'s curse limit but retains all effects); 9=Chain (inscribe another known curse into the same target for half Sigil cost as part of the same action); 10=Swapped Save (a different random save type is used instead). Usable a number of times equal to your Intelligence modifier per short rest. From level 15 (Enlivened Rune) you may also pay 5 HP to roll twice and choose which result to use.',
+          description: 'When inscribing a curse you may choose to release its arcane power fully and roll 1d10, augmenting the curse\'s effect: 1=Eruption (curse fails, both you and target make Dex save or take Xd6 force); 2=Leaping Curse (curse also hits one additional target within 15ft for free); 3=Rejected Host (curse hits a random different creature within 30ft instead); 4=Greed (cost reduced by 1d4 Sigils, minimum 0); 5=Overwhelmed (cost increased by 1d4 Sigils); 6=Intensified (save DC +1 if applicable); 7=Mirrored (you suffer the curse instead of the target); 8=Untethered (curse doesn\'t count toward the target\'s curse limit but retains all effects); 9=Chain (inscribe another known curse into the same target for half Sigil cost as part of the same action); 10=Swapped Save (a different random save type is used instead). Usable a number of times equal to your Intelligence modifier per short rest. From level 15 (Envigored Rune) you may also pay 5 HP to roll twice and choose which result to use.',
         },
         'curse-of-the-uncontained-chaos': {
           id: 'curse-of-the-uncontained-chaos',
@@ -222,9 +222,9 @@ export const HEXER = {
           level: 7,
           description: 'You learn an additional curse that always does not count toward your total curses known. This curse costs 3 Sigils to apply: select one other curse you know at random and inscribe it into the target for no additional Sigil cost. From 11th level, when you use Communicable Curse with this curse, select one additional target and all targets subtract 1d4 from their saving throw roll. When this curse spreads to additional targets, a different random known curse is selected for each.',
         },
-        'enlivened-rune': {
-          id: 'enlivened-rune',
-          name: 'Enlivened Rune',
+        'envigored-rune': {
+          id: 'envigored-rune',
+          name: 'Envigored Rune',
           level: 15,
           description: 'Even when drained of Sigils, your curses demand release. You may attempt to inscribe a curse without enough Sigils — for every missing Sigil you take 10 force damage (cannot be reduced). Additionally when using Arcane Release you may sacrifice 5 hit points to roll the d10 twice and choose which result to use.',
         },
