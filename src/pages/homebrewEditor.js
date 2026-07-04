@@ -13,6 +13,7 @@ const EFFECT_TYPES = [
   { value: 'initiative-bonus',    label: 'Initiative bonus' },
   { value: 'speed-bonus',         label: 'Speed bonus' },
   { value: 'damage-resistance',   label: 'Damage resistance' },
+  { value: 'damage-vulnerability',label: 'Damage vulnerability' },
   { value: 'condition-immunity',  label: 'Condition immunity' },
   { value: 'limited-use',         label: 'Limited use ability' },
   { value: 'passive',             label: 'Passive / flavour text' },
@@ -25,6 +26,7 @@ const PLAYER_CHOICE_POOLS = {
   'skill-expertise':   { label: 'Skills',          options: ['Acrobatics','Animal handling','Arcana','Athletics','Deception','History','Insight','Intimidation','Investigation','Medicine','Nature','Perception','Performance','Persuasion','Religion','Sleight of hand','Stealth','Survival'] },
   'save-proficiency':  { label: 'Saving throws',   options: ['strength','dexterity','constitution','intelligence','wisdom','charisma'] },
   'damage-resistance': { label: 'Damage types',    options: ['Acid','Cold','Fire','Force','Lightning','Necrotic','Piercing','Poison','Psychic','Radiant','Slashing','Thunder'] },
+  'damage-vulnerability': { label: 'Damage types', options: ['Acid','Cold','Fire','Force','Lightning','Necrotic','Piercing','Poison','Psychic','Radiant','Slashing','Thunder'] },
   'language-choice':   { label: 'Languages',       options: ['Abyssal','Aquan','Auran','Celestial','Common','Deep Speech','Draconic','Druidic','Dwarvish','Elvish','Giant','Gnomish','Goblin','Gnoll','Halfling','Ignan','Infernal','Orc','Primordial','Sylvan','Terran','Thieves Cant','Undercommon'] },
 };
 
@@ -92,7 +94,7 @@ export async function renderHomebrewEditor(container) {
     // Build the fixed-value detail controls (hidden when playerChoice is on for the
     // types where the fixed target becomes irrelevant)
     let detail = '';
-    const hideFixed = isChoice && ['stat-bonus', 'skill-proficiency', 'skill-expertise', 'save-proficiency', 'damage-resistance'].includes(effect.type);
+    const hideFixed = isChoice && ['stat-bonus', 'skill-proficiency', 'skill-expertise', 'save-proficiency', 'damage-resistance', 'damage-vulnerability'].includes(effect.type);
 
     if (!hideFixed) {
       if (effect.type === 'stat-bonus') {
@@ -115,6 +117,11 @@ export async function renderHomebrewEditor(container) {
           <select class="form-select eff-detail" data-idx="${idx}" data-key="damageType">
             ${DAMAGES.map(d => `<option value="${d}" ${effect.damageType === d ? 'selected' : ''}>${d}</option>`).join('')}
           </select>`;
+      } else if (effect.type === 'damage-vulnerability') {
+        detail = `
+          <select class="form-select eff-detail" data-idx="${idx}" data-key="damageType">
+            ${DAMAGES.map(d => `<option value="${d}" ${effect.damageType === d ? 'selected' : ''}>${d}</option>`).join('')}
+          </select>`;
       }
     }
 
@@ -124,7 +131,7 @@ export async function renderHomebrewEditor(container) {
     } else if (['ac-bonus', 'initiative-bonus', 'speed-bonus'].includes(effect.type)) {
       detail = `
         <input class="form-input eff-detail" data-idx="${idx}" data-key="amount"
-          type="number" value="${effect.amount || 1}" style="width:70px;" placeholder="Amount" />`;
+          type="number" value="${effect.amount || 1}" style="width:70px;" placeholder="Amount" title="Use a negative number for a penalty (e.g. -2)" />`;
     } else if (effect.type === 'condition-immunity') {
       detail = `
         <select class="form-select eff-detail" data-idx="${idx}" data-key="condition">
@@ -153,7 +160,7 @@ export async function renderHomebrewEditor(container) {
     if (effect.type === 'stat-bonus') {
       amountField = `
         <input class="form-input eff-detail" data-idx="${idx}" data-key="amount"
-          type="number" value="${effect.amount || 1}" style="width:70px;" placeholder="+amt" />`;
+          type="number" value="${effect.amount || 1}" style="width:70px;" placeholder="+amt" title="Use a negative number for a penalty (e.g. -1)" />`;
     }
     if (effect.type === 'language-choice') {
       amountField = `
@@ -324,6 +331,21 @@ export async function renderHomebrewEditor(container) {
               <select class="form-select" id="hb-armor-type">
                 <option value="">—</option>
                 ${['light','medium','heavy'].map(t => `<option value="${t}" ${item.data.armorType === t ? 'selected' : ''}>${t}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="form-row cols-2">
+            <div class="form-group">
+              <label>Max charges (optional — e.g. a wand with 7 charges)</label>
+              <input class="form-input" type="number" id="hb-max-charges" min="0" value="${item.data.maxCharges || 0}" placeholder="0 = no charges" />
+            </div>
+            <div class="form-group">
+              <label>Charge recharge</label>
+              <select class="form-select" id="hb-charge-recharge">
+                <option value="">Manual only</option>
+                <option value="dawn" ${item.data.chargeRecharge === 'dawn' ? 'selected' : ''}>Daily (dawn)</option>
+                <option value="long" ${item.data.chargeRecharge === 'long' ? 'selected' : ''}>Long rest</option>
+                <option value="short" ${item.data.chargeRecharge === 'short' ? 'selected' : ''}>Short rest</option>
               </select>
             </div>
           </div>
@@ -733,10 +755,19 @@ export async function renderHomebrewEditor(container) {
     document.querySelectorAll('.hb-del').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm('Delete this item?')) return;
-        await deleteHomebrew(btn.dataset.id);
-        items = items.filter(i => i.id !== btn.dataset.id);
-        editingItem = null;
-        fullRender();
+        btn.disabled = true;
+        try {
+          await deleteHomebrew(btn.dataset.id);
+          // Re-fetch from the database rather than trusting the local list —
+          // if the delete didn't actually persist (e.g. an RLS issue), this
+          // will show the item still there instead of hiding a real failure.
+          await load();
+          editingItem = null;
+          fullRender();
+        } catch (e) {
+          alert('Error deleting: ' + e.message);
+          btn.disabled = false;
+        }
       });
     });
 
@@ -778,18 +809,28 @@ export async function renderHomebrewEditor(container) {
           item.data.finesse        = document.getElementById('hb-finesse')?.value === 'true';
           item.data.baseAC      = parseInt(document.getElementById('hb-base-ac')?.value) || 0;
           item.data.armorType   = document.getElementById('hb-armor-type')?.value;
+          item.data.maxCharges     = parseInt(document.getElementById('hb-max-charges')?.value) || 0;
+          item.data.chargeRecharge = document.getElementById('hb-charge-recharge')?.value || null;
           item.data.properties  = document.getElementById('hb-props')?.value.split(',').map(s => s.trim()).filter(Boolean) || [];
         }
 
+        const saveBtn = document.getElementById('hb-save');
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
         try {
           const saved = await saveHomebrew({ ...item, type: activeType });
-          items = item.id
-            ? items.map(i => i.id === saved.id ? saved : i)
-            : [...items, saved];
+          // Re-fetch from the database rather than trusting the local optimistic
+          // update — if the save didn't actually persist (e.g. an RLS issue),
+          // this will surface it immediately instead of only on next refresh.
+          await load();
+          const stillThere = items.some(i => i.id === saved.id);
           editingItem = null;
           fullRender();
+          if (!stillThere) {
+            alert('Warning: the save appeared to succeed, but the item is missing when re-loaded from the database. Please check your Supabase RLS policies and try again.');
+          }
         } catch (e) {
           alert('Error saving: ' + e.message);
+          if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = `Save ${activeType}`; }
         }
       });
     }
