@@ -37,6 +37,7 @@ export function deriveStats(character) {
   const featInitBonus     = character.featInitBonus     || 0;
   const featSpeedBonus    = character.featSpeedBonus    || 0;
   const damageResistances = character.damageResistances || [];
+  const damageVulnerabilities = character.damageVulnerabilities || [];
   const conditionImmunities = character.conditionImmunities || [];
 
   // Also fold in skill expertise granted by feats (in addition to class expertises)
@@ -164,7 +165,7 @@ export function deriveStats(character) {
     prof, mods, initiativeBonus, ac, saves, skills,
     passivePerception, spellSaveDC, spellAttackBonus,
     trickShotDC, calledShotDC, suppressingFireDC, showstopperDC, nerveDice, recklessFusillade,
-    speed, damageResistances, conditionImmunities,
+    speed, damageResistances, damageVulnerabilities, conditionImmunities,
     mutationSaveDC, mutatorSpellSaveDC, mutatorSpellAttackBonus,
     curseSaveDC, hexerSpellSaveDC, hexerSpellAttackBonus,
   };
