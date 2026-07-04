@@ -4,7 +4,7 @@ import { deriveStats, maxHP, getMisfireScore, weaponAttack, shortRestNerveDiceRe
 import { OUTLAW, getProgression, getUnlockedFeatures, getNerveDice } from '../lib/classes/outlaw.js';
 import { MUTATOR, getMutatorProgression, getMutatorUnlockedFeatures, getAvailableMutations, getMutatorSpellSlots, getMaxActiveMutations } from '../lib/classes/mutator.js';
 import { HEXER, getHexerProgression, getHexerUnlockedFeatures, getAvailableCurses, getCursesKnown, getSigils, getHexerSpellSlots, getMaxCursesPerTarget } from '../lib/classes/hexer.js';
-import { WIZARD_SPELLS } from '../lib/spells.js';
+import { WIZARD_SPELLS, HEXER_SPELL_SOURCE } from '../lib/spells.js';
 import { sendRollToDnDBeyond, rollDie, rollDice } from '../app.js';
 
 let char = null;       // raw DB record
@@ -34,18 +34,38 @@ const SUBSPECIES_TRAITS = {
 let homebrew = [];
 let activeTab = 'core';
 let saveTimer = null;
+let savePending = false;
 let userId = null;
 let isDM = false;
+let visibilityHandler = null;
+let pagehideHandler = null;
 
 function scheduleAutoSave() {
+  savePending = true;
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      await saveCharacter({ ...char, data }, userId);
-    } catch (e) {
-      console.error('Auto-save failed', e);
-    }
-  }, 1500);
+  saveTimer = setTimeout(doSave, 900);
+}
+
+async function doSave() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  if (!savePending || !char) return;
+  savePending = false;
+  try {
+    await saveCharacter({ ...char, data }, userId);
+  } catch (e) {
+    console.error('Auto-save failed', e);
+    savePending = true; // keep it marked dirty so a later flush retries
+    showMsg('⚠ Save failed — check your connection. Retrying…');
+  }
+}
+
+// Immediately persists any unsaved change instead of waiting for the debounce.
+// Exposed on window so app.js can call it right before navigating away from
+// the sheet, and used internally on tab-hide / page-hide so a refresh or
+// closed tab doesn't lose the last few seconds of edits.
+export async function flushPendingSave() {
+  if (!savePending) return;
+  await doSave();
 }
 
 function mutate(fn) {
@@ -77,6 +97,7 @@ function buildCharacterForCalc() {
     featInitBonus: data.initBonus || 0,
     featSpeedBonus: data.speedBonus || 0,
     damageResistances: data.damageResistances || [],
+    damageVulnerabilities: data.damageVulnerabilities || [],
     conditionImmunities: data.conditionImmunities || [],
   };
 }
@@ -124,6 +145,20 @@ export async function renderSheet(container, characterId, uid, dm, navigate) {
 
   // Render immediately — don't let realtime setup delay the sheet
   renderSheetUI();
+
+  // ── Flush unsaved changes on tab-hide / page-hide / before navigating away ──
+  // The debounced autosave (900ms) is enough for normal use, but if the player
+  // refreshes, closes the tab, or switches away right after an edit, the timer
+  // may not have fired yet. Flushing here — plus app.js calling
+  // window._hbsFlushSave() before in-app navigation — makes sure the last
+  // edit is never silently lost.
+  window._hbsFlushSave = flushPendingSave;
+  if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler);
+  if (pagehideHandler) window.removeEventListener('pagehide', pagehideHandler);
+  visibilityHandler = () => { if (document.visibilityState === 'hidden') flushPendingSave(); };
+  pagehideHandler = () => { flushPendingSave(); };
+  document.addEventListener('visibilitychange', visibilityHandler);
+  window.addEventListener('pagehide', pagehideHandler);
 
   // ── Apply homebrew species named trait effects (once, on load) ──────────
   // Named traits on homebrew species may have mechanical effects (AC bonus, etc.)
@@ -237,6 +272,7 @@ function renderSheetUI() {
           <span class="badge">AC ${derived.ac}</span>
           <span class="badge">Speed ${derived.speed} ft</span>
           ${derived.damageResistances?.length ? `<span class="badge badge-gold">Resist: ${derived.damageResistances.join(', ')}</span>` : ''}
+          ${derived.damageVulnerabilities?.length ? `<span class="badge badge-danger">Vulnerable: ${derived.damageVulnerabilities.join(', ')}</span>` : ''}
           ${derived.conditionImmunities?.length ? `<span class="badge">Immune: ${derived.conditionImmunities.join(', ')}</span>` : ''}
           ${derived.trickShotDC ? `<span class="badge badge-gold">Trick Shot DC ${derived.trickShotDC}</span>` : ''}
           ${derived.mutationSaveDC ? `<span class="badge badge-gold">Mutation DC ${derived.mutationSaveDC}</span>` : ''}
@@ -356,6 +392,13 @@ function renderSheetUI() {
       data.hitDiceUsed = Math.max(0, used - restored);
       if (data.recklessFusillade) data.recklessFusillade.used = 0;
       if (data.legendaryDuel) data.legendaryDuel.used = false;
+      resetLimitedUseResourcesOnRest('long');
+      // Recharge item charges that reset on a long rest / daily at dawn
+      (data.inventory || []).forEach(item => {
+        if (item.maxCharges && (item.chargeRecharge === 'long' || item.chargeRecharge === 'dawn' || item.chargeRecharge === 'short')) {
+          item.charges = item.maxCharges;
+        }
+      });
       // Hexer: sigils and spell slots reset on long rest
       if (char.class_id === 'hexer') {
         data.sigilsUsed = 0;
@@ -615,6 +658,31 @@ function renderCombatTab(tc) {
     });
   });
 
+  // Weapon charge pips (e.g. a wand's charges) — same pattern as the Inventory tab
+  tc.querySelectorAll('.charge-pip').forEach(pip => {
+    pip.addEventListener('click', () => {
+      const id = pip.dataset.id;
+      const max = parseInt(pip.dataset.max);
+      mutate(() => {
+        const item = data.inventory.find(i => i.id === id);
+        if (!item) return;
+        const current = item.charges ?? max;
+        item.charges = pip.classList.contains('available')
+          ? Math.max(0, current - 1)
+          : Math.min(max, current + 1);
+      });
+    });
+  });
+  tc.querySelectorAll('.charge-reset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      mutate(() => {
+        const item = data.inventory.find(i => i.id === id);
+        if (item) item.charges = item.maxCharges;
+      });
+    });
+  });
+
   // Trick shots
   tc.querySelectorAll('.trick-use').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -681,12 +749,25 @@ function renderCombatTab(tc) {
 function renderAttackRow(item) {
   const { attackBonus, damageBonus } = weaponAttack(item, buildCharacterForCalc(), derived);
   const misfire = getMisfireScore(item, buildCharacterForCalc());
+  const hasCharges = parseInt(item.maxCharges) > 0;
+  const charges = hasCharges ? Math.max(0, Math.min(item.maxCharges, item.charges ?? item.maxCharges)) : 0;
 
   return `<div class="attack-row">
     <div>
       <div class="attack-name">${item.name}</div>
       <div class="attack-detail">${item.range ? `Range ${item.range}` : 'Melee'} · ${item.damage || '—'} ${item.damageType || ''}</div>
       ${misfire ? `<div class="attack-misfire">Misfire: ${misfire}+</div>` : ''}
+      ${hasCharges ? `
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.35rem; flex-wrap:wrap;">
+          <div class="slot-pips">
+            ${Array.from({ length: item.maxCharges }, (_, i) => `
+              <div class="slot-pip charge-pip ${i < charges ? 'available' : 'used'}" data-id="${item.id}" data-max="${item.maxCharges}"></div>
+            `).join('')}
+          </div>
+          <span style="font-size:0.78rem; color:var(--text-dim);">${charges} / ${item.maxCharges} charges</span>
+          <button class="btn btn-sm charge-reset" data-id="${item.id}" title="Reset to full charges">↺</button>
+        </div>` : ''
+      }
     </div>
     <div class="attack-btns">
       <button class="btn btn-sm btn-gold attack-btn-hit" data-bonus="${attackBonus}">${formatMod(attackBonus)} to hit</button>
@@ -882,6 +963,92 @@ function renderNerveTab(tc) {
   });
 }
 
+// ── Limited-use resource tracking (feats / species / subspecies traits) ───────
+// Any homebrew 'limited-use' effect (abilityName, uses, recharge) gets a
+// per-character use counter here, keyed off a stable path to where the effect
+// lives, so it works the same way as Nerve Dice / spell slot pips.
+function makeLimitedUseResource(effect, key) {
+  const max = Math.max(1, parseInt(effect.uses) || 1);
+  const used = (data.featResourceUses || {})[key] || 0;
+  return {
+    key, max, used,
+    name: effect.abilityName || 'Ability',
+    recharge: effect.recharge === 'short' ? 'short' : 'long',
+    remaining: Math.max(0, max - used),
+  };
+}
+
+function collectLimitedUseResources() {
+  const resources = [];
+  const byOwner = new WeakMap();
+  function attach(owner, effect, key) {
+    const r = makeLimitedUseResource(effect, key);
+    resources.push(r);
+    const list = byOwner.get(owner) || [];
+    list.push(r);
+    byOwner.set(owner, list);
+  }
+
+  (data.feats || []).forEach((f, fi) => {
+    (f.effects || []).forEach((e, ei) => {
+      if (e.type === 'limited-use') attach(f, e, `feat:${f.id || f.name || fi}:${ei}`);
+    });
+  });
+
+  const speciesEntry = homebrew.find(h => h.type === 'species' && (`hb_${h.id}` === data.speciesId || h.id === data.speciesId));
+  if (speciesEntry) {
+    const sid = speciesEntry.id;
+    (speciesEntry.data?.effects || []).forEach((e, ei) => {
+      if (e.type === 'limited-use') attach(e, e, `species:${sid}:legacy:${ei}`);
+    });
+    (speciesEntry.data?.speciesTraits || []).forEach((t, ti) => {
+      (t.effects || []).forEach((e, ei) => {
+        if (e.type === 'limited-use') attach(t, e, `species:${sid}:trait:${ti}:${ei}`);
+      });
+    });
+    const hbSubspecies = speciesEntry.data?.subspecies || [];
+    const hbSubEntry = data.subspeciesId?.startsWith('hb_sub_')
+      ? hbSubspecies[parseInt(data.subspeciesId.replace('hb_sub_', ''))]
+      : null;
+    (hbSubEntry?.traits || []).forEach((t, ti) => {
+      (t.effects || []).forEach((e, ei) => {
+        if (e.type === 'limited-use') attach(t, e, `subspecies:${sid}:${data.subspeciesId}:${ti}:${ei}`);
+      });
+    });
+  }
+
+  return { resources, byOwner };
+}
+
+// Renders pip trackers + a per-pip "use" click target for one or more resources
+// tied to a single feat/trait. Mirrors the Nerve Dice / spell-slot pip pattern.
+function renderResourceWidgets(resList) {
+  if (!resList || !resList.length) return '';
+  return resList.map(r => {
+    const pips = Array.from({ length: r.max }, (_, i) => `
+      <div class="slot-pip limited-use-pip ${i < (r.max - r.used) ? 'available' : 'used'}"
+        data-key="${r.key}" data-max="${r.max}" title="${r.name}"></div>
+    `).join('');
+    return `<div style="display:flex; align-items:center; gap:0.6rem; margin-top:0.5rem; flex-wrap:wrap;">
+      <div class="slot-pips">${pips}</div>
+      <span style="font-size:0.78rem; color:var(--text-dim);">${r.remaining} / ${r.max} uses · ${r.recharge} rest</span>
+    </div>`;
+  }).join('');
+}
+
+// Reset limited-use resources on rest. restType is 'short' or 'long' — a long
+// rest also clears short-rest resources.
+function resetLimitedUseResourcesOnRest(restType) {
+  const { resources } = collectLimitedUseResources();
+  if (!resources.length) return;
+  data.featResourceUses = { ...(data.featResourceUses || {}) };
+  resources.forEach(r => {
+    if (restType === 'long' || r.recharge === 'short') {
+      data.featResourceUses[r.key] = 0;
+    }
+  });
+}
+
 // ── FEATURES TAB ──────────────────────────────────────────────────────────────
 function renderFeaturesTab(tc) {
   // 1. Class features sorted by level
@@ -901,6 +1068,9 @@ function renderFeaturesTab(tc) {
 
   // 3. Feats taken (includes ASIs applied as feats)
   const feats = data.feats || [];
+
+  // Limited-use resources (Use-button pips) tied to feats/species/subspecies traits
+  const { byOwner: limitedUseByOwner } = collectLimitedUseResources();
 
   let html = `<div class="card" style="margin-bottom:1rem;">
     <div class="card-title">Class features · Level ${char.level}</div>
@@ -964,6 +1134,7 @@ function renderFeaturesTab(tc) {
           <div class="feature-item">
             <div class="feature-name">${t.name || t.abilityName || 'Trait'}</div>
             <div class="feature-desc">${t.description || ''}</div>
+            ${renderResourceWidgets(limitedUseByOwner.get(t))}
           </div>
         `).join('')}
         ${subspeciesTraits.length > 0 ? `
@@ -972,6 +1143,7 @@ function renderFeaturesTab(tc) {
             <div class="feature-item">
               <div class="feature-name">${typeof t === 'string' ? t : t.name}</div>
               <div class="feature-desc">${typeof t === 'string' ? '' : (t.description || '')}</div>
+              ${typeof t === 'string' ? '' : renderResourceWidgets(limitedUseByOwner.get(t))}
             </div>
           `).join('')}` : ''}
       </div>`;
@@ -990,6 +1162,7 @@ function renderFeaturesTab(tc) {
           <div class="feature-name">${f.name}</div>
           ${asiText ? `<div style="font-size:0.85rem; color:var(--gold); margin-bottom:0.25rem;">${asiText}</div>` : ''}
           <div class="feature-desc">${f.description || ''}</div>
+          ${renderResourceWidgets(limitedUseByOwner.get(f))}
         </div>`;
       }).join('')}
     </div>`;
@@ -1126,6 +1299,22 @@ function renderFeaturesTab(tc) {
           if (idx > -1) langs.splice(idx, 1);
         }
         data.chosenLanguages = langs;
+      });
+    });
+  });
+
+  // Limited-use feature pips (feats / species / subspecies traits) — click an
+  // available pip to spend a use, click a spent pip to give it back.
+  tc.querySelectorAll('.limited-use-pip').forEach(pip => {
+    pip.addEventListener('click', () => {
+      const key = pip.dataset.key;
+      const max = parseInt(pip.dataset.max);
+      mutate(() => {
+        data.featResourceUses = { ...(data.featResourceUses || {}) };
+        const used = data.featResourceUses[key] || 0;
+        data.featResourceUses[key] = pip.classList.contains('available')
+          ? Math.min(max, used + 1)
+          : Math.max(0, used - 1);
       });
     });
   });
@@ -1291,6 +1480,33 @@ function renderInventoryTab(tc) {
     });
   });
 
+  // Charge pips — click an available pip to spend a charge, a spent pip to give it back
+  tc.querySelectorAll('.charge-pip').forEach(pip => {
+    pip.addEventListener('click', () => {
+      const id = pip.dataset.id;
+      const max = parseInt(pip.dataset.max);
+      mutate(() => {
+        const item = data.inventory.find(i => i.id === id);
+        if (!item) return;
+        const current = item.charges ?? max;
+        item.charges = pip.classList.contains('available')
+          ? Math.max(0, current - 1)
+          : Math.min(max, current + 1);
+      });
+    });
+  });
+
+  // Reset charges to full
+  tc.querySelectorAll('.charge-reset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      mutate(() => {
+        const item = data.inventory.find(i => i.id === id);
+        if (item) item.charges = item.maxCharges;
+      });
+    });
+  });
+
   document.getElementById('add-item-builtin')?.addEventListener('click', () => showAddItemModal(hbItems, false));
   document.getElementById('add-item-custom')?.addEventListener('click', () => showAddItemModal(hbItems, true));
 }
@@ -1303,6 +1519,8 @@ function renderInvRow(item) {
   const isEquipped = isArmor ? item.id === data.equippedArmorId
     : isShield ? item.id === data.equippedShieldId
     : item.equipped;
+  const hasCharges = parseInt(item.maxCharges) > 0;
+  const charges = hasCharges ? Math.max(0, Math.min(item.maxCharges, item.charges ?? item.maxCharges)) : 0;
 
   return `<div class="inv-row">
     ${(isWeapon || isArmor || isShield)
@@ -1312,6 +1530,17 @@ function renderInvRow(item) {
     <div style="flex:1;">
       <div class="inv-name">${item.name}</div>
       <div class="inv-detail">${item.detail || (isArmor ? `AC ${item.baseAC} (${item.armorType})` : item.damage ? `${item.damage} ${item.damageType||''}` : '')}</div>
+      ${hasCharges ? `
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.35rem; flex-wrap:wrap;">
+          <div class="slot-pips">
+            ${Array.from({ length: item.maxCharges }, (_, i) => `
+              <div class="slot-pip charge-pip ${i < charges ? 'available' : 'used'}" data-id="${item.id}" data-max="${item.maxCharges}"></div>
+            `).join('')}
+          </div>
+          <span style="font-size:0.78rem; color:var(--text-dim);">${charges} / ${item.maxCharges} charges</span>
+          <button class="btn btn-sm charge-reset" data-id="${item.id}" title="Reset to full charges">↺</button>
+        </div>` : ''
+      }
     </div>
     <input type="number" class="form-input inv-qty-input" data-id="${item.id}" value="${item.quantity||1}" style="width:55px; text-align:center;" min="0" />
     <button class="btn btn-sm btn-danger inv-delete" data-id="${item.id}">✕</button>
@@ -1395,6 +1624,7 @@ function showAddItemModal(hbItems, customMode) {
         <div class="form-group"><label>Base AC (if armor)</label><input class="form-input" type="number" id="ci-baseac" value="0" /></div>
       </div>
       <div class="form-group"><label>Extra damage dice (e.g. 1d6 fire for magic weapon)</label><input class="form-input" id="ci-extra" placeholder="1d6 Fire" /></div>
+      <div class="form-group"><label>Max charges (optional — e.g. a wand with 7 charges)</label><input class="form-input" type="number" id="ci-maxcharges" min="0" placeholder="0 = no charges" /></div>
       <div class="form-group"><label>Notes / description</label><input class="form-input" id="ci-detail" placeholder="Optional details" /></div>
       <div class="modal-footer">
         <button class="btn" id="ci-cancel">Cancel</button>
@@ -1429,7 +1659,14 @@ function showAddItemModal(hbItems, customMode) {
       if (!item) return;
       mutate(() => {
         data.inventory = data.inventory || [];
-        data.inventory.push({ ...item, id: `item_${Date.now()}`, quantity: 1, equipped: false });
+        const maxCharges = parseInt(item.maxCharges) || 0;
+        data.inventory.push({
+          ...item,
+          id: `item_${Date.now()}`,
+          quantity: 1,
+          equipped: false,
+          ...(maxCharges > 0 ? { maxCharges, charges: maxCharges } : {}),
+        });
       });
       overlay.remove();
     });
@@ -1438,6 +1675,7 @@ function showAddItemModal(hbItems, customMode) {
   overlay.querySelector('#ci-add')?.addEventListener('click', () => {
     const name = document.getElementById('ci-name')?.value;
     if (!name) { alert('Enter item name'); return; }
+    const maxCharges = parseInt(document.getElementById('ci-maxcharges')?.value) || 0;
     const newItem = {
       id: `item_${Date.now()}`,
       name,
@@ -1453,6 +1691,7 @@ function showAddItemModal(hbItems, customMode) {
       detail: document.getElementById('ci-detail')?.value || null,
       quantity: 1,
       equipped: false,
+      ...(maxCharges > 0 ? { maxCharges, charges: maxCharges } : {}),
     };
     mutate(() => { data.inventory = data.inventory || []; data.inventory.push(newItem); });
     overlay.remove();
@@ -2118,8 +2357,9 @@ function renderHexerSpellsTab(tc) {
   const intMod      = derived.mods.intelligence;
   const maxPrepared = Math.max(1, intMod + Math.floor(char.level / 2));
 
-  // Build spell pool from Hexer spell list
-  const hexerSpellPool = WIZARD_SPELLS.filter(s => {
+  // Build spell pool from Hexer spell list (wizard spells + Hexer-only additions —
+  // the Hexer's list draws from multiple traditions, not just wizard spells)
+  const hexerSpellPool = HEXER_SPELL_SOURCE.filter(s => {
     if (s.level === 0) return false;
     const spellsAtLevel = HEXER.spellList[s.level] || [];
     return spellsAtLevel.some(name =>
@@ -2209,7 +2449,7 @@ function renderHexerSpellsTab(tc) {
 
   tc.querySelectorAll('.hcast-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      const spell = WIZARD_SPELLS.find(s => s.id === btn.dataset.spell);
+      const spell = HEXER_SPELL_SOURCE.find(s => s.id === btn.dataset.spell);
       if (!spell) return;
       const level = parseInt(btn.dataset.level);
       const max   = slots[`s${level}`] || 0;
@@ -2535,6 +2775,15 @@ function wireAddFeat(tc) {
         );
         if (!picked) return;
         resolvedChoices[ei] = picked;
+
+      } else if (e.type === 'damage-vulnerability') {
+        const pool = e.allowedChoices?.length ? e.allowedChoices
+          : ['Acid','Cold','Fire','Force','Lightning','Necrotic','Piercing','Poison','Psychic','Radiant','Slashing','Thunder'];
+        const picked = await showGenericPickerModal(
+          feat.name + ' — Damage vulnerability', 'Choose a damage type:', pool, 1
+        );
+        if (!picked) return;
+        resolvedChoices[ei] = picked;
       }
     }
 
@@ -2620,6 +2869,10 @@ function showShortRestModal() {
       if (ndRecovery > 0) {
         data.nerveDiceCurrent = Math.min(data.nerveDiceMax || char.level, (data.nerveDiceCurrent || 0) + ndRecovery);
       }
+      resetLimitedUseResourcesOnRest('short');
+      (data.inventory || []).forEach(item => {
+        if (item.maxCharges && item.chargeRecharge === 'short') item.charges = item.maxCharges;
+      });
     });
     sendRollToDnDBeyond(
       `Short rest (${diceToSpend}d${hitDie})`,
@@ -2642,6 +2895,10 @@ function showShortRestModal() {
       }
       if (char.class_id === 'mutator') { data.biomassUsed = 0; data.activeMutations = []; }
       if (char.class_id === 'hexer' && data.disciplineId === 'hellion') { data.arcaneReleaseUsed = 0; }
+      resetLimitedUseResourcesOnRest('short');
+      (data.inventory || []).forEach(item => {
+        if (item.maxCharges && item.chargeRecharge === 'short') item.charges = item.maxCharges;
+      });
     });
     showMsg('Short rest complete.'
       + (ndRecovery > 0 ? ` Recovered ${ndRecovery} Nerve Dice.` : '')
@@ -3127,6 +3384,14 @@ function applyFeatEffects(effects, resolvedChoices) {
       if (dmg) {
         data.damageResistances = data.damageResistances || [];
         if (!data.damageResistances.includes(dmg)) data.damageResistances.push(dmg);
+      }
+    }
+
+    if (e.type === 'damage-vulnerability') {
+      const dmg = e.playerChoice ? chosen[0] : e.damageType;
+      if (dmg) {
+        data.damageVulnerabilities = data.damageVulnerabilities || [];
+        if (!data.damageVulnerabilities.includes(dmg)) data.damageVulnerabilities.push(dmg);
       }
     }
 
