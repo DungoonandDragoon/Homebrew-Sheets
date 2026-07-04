@@ -189,9 +189,56 @@ export const SHAMAN_SPELLS = [
   { id:'tree-stride',        name:'Tree stride',        level:5, school:'conjuration',  castTime:'1 action',  range:'Self',   duration:'1 minute',      concentration:true,  components:'V,S',      description:'Enter a living tree and emerge from another of same species within 500ft, using 5ft of movement.' },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Hexer-only spells — the Hexer's spell list (HEXER.spellList in classes/hexer.js)
+// is a custom mix drawn from several traditions, not just the wizard list.
+// These are the spells on that list that don't already exist in WIZARD_SPELLS.
+// Combine with WIZARD_SPELLS (see HEXER_SPELL_SOURCE below) to get full coverage.
+// ─────────────────────────────────────────────────────────────────────────────
+export const HEXER_SPELLS = [
+  // Level 1
+  { id:'bane',              name:'Bane',              level:1, school:'enchantment',  castTime:'1 action',  range:'30ft',   duration:'1 minute',      concentration:true,  components:'V,S,M',    description:'Up to three creatures make a Cha save or subtract 1d4 from attack rolls and saving throws until the spell ends.' },
+  { id:'bless',             name:'Bless',             level:1, school:'enchantment',  castTime:'1 action',  range:'30ft',   duration:'1 minute',      concentration:true,  components:'V,S,M',    description:'Up to three creatures add 1d4 to attack rolls and saving throws until the spell ends.' },
+  { id:'cause-fear',        name:'Cause fear',        level:1, school:'necromancy',   castTime:'1 action',  range:'60ft',   duration:'1 minute',      concentration:true,  components:'V',        description:'One creature makes a Wis save or becomes frightened of you for the duration. Repeats the save whenever it takes damage.' },
+  { id:'hex',               name:'Hex',               level:1, school:'enchantment',  castTime:'1 bonus action', range:'90ft', duration:'1 hour',    concentration:true,  components:'V,S,M',    description:'Curse a creature. Deal extra 1d6 necrotic when you hit it. Target has disadvantage on one chosen ability. Move curse on target death.' },
+  { id:'hunters-mark',      name:"Hunter's mark",     level:1, school:'divination',   castTime:'1 bonus action', range:'90ft', duration:'1 hour',    concentration:true,  components:'V',        description:'Mark a creature. Deal extra 1d6 when you hit it. Advantage on Perception/Survival checks to find it. Move mark if it dies.' },
+  { id:'cure-wounds',       name:'Cure wounds',       level:1, school:'evocation',    castTime:'1 action',  range:'Touch',  duration:'Instantaneous', concentration:false, components:'V,S',      description:'A creature you touch regains 1d8 + spellcasting modifier hit points.' },
+  { id:'inflict-wounds',    name:'Inflict wounds',    level:1, school:'necromancy',   castTime:'1 action',  range:'Touch',  duration:'Instantaneous', concentration:false, components:'V,S',      description:'Melee spell attack. Hit: 3d10 necrotic damage.' },
+  { id:'sanctuary',         name:'Sanctuary',         level:1, school:'abjuration',   castTime:'1 bonus action', range:'30ft', duration:'1 minute',  concentration:false, components:'V,S,M',    description:'Attackers must Wis save or choose a new target. Ends if warded creature attacks or casts a harmful spell.' },
+  { id:'command',           name:'Command',           level:1, school:'enchantment',  castTime:'1 action',  range:'60ft',   duration:'1 round',       concentration:false, components:'V',        description:'One creature you can see must obey a one-word command (drop, approach, flee, halt, grovel, prone) or make a Wis save to resist.' },
+  { id:'illusory-script',   name:'Illusory script',   level:1, school:'illusion',     castTime:'1 min (ritual)', range:'Touch', duration:'10 days',  concentration:false, components:'S,M',      description:'Write a message that appears as gibberish to anyone but creatures you designate, who read it in your handwriting and chosen language.' },
+  // Level 2
+  { id:'barkskin',          name:'Barkskin',          level:2, school:'transmutation',castTime:'1 action',  range:'Touch',  duration:'1 hour',        concentration:true,  components:'V,S,M',    description:"A willing creature's AC can't be less than 16, regardless of the armor it's wearing." },
+  { id:'warding-bond',      name:'Warding bond',      level:2, school:'abjuration',   castTime:'1 action',  range:'Touch',  duration:'1 hour',        concentration:false, components:'V,S,M',    description:'Link with a willing creature: it gains +1 AC and saves and resistance to all damage; you take the same damage it takes. Ends early if you drop to 0 HP or move more than 60ft apart.' },
+  { id:'enhance-ability',   name:'Enhance ability',   level:2, school:'transmutation',castTime:'1 action',  range:'Touch',  duration:'1 hour',        concentration:true,  components:'V,S,M',    description:'A creature gains advantage on ability checks with one chosen ability score, plus a minor bonus effect based on the ability chosen.' },
+  // Level 3
+  { id:'bestow-curse',      name:'Bestow curse',      level:3, school:'necromancy',   castTime:'1 action',  range:'Touch',  duration:'1 minute',      concentration:true,  components:'V,S,M',    description:'Curse a creature you touch (Con save resists) with a disadvantage effect of your choice on ability checks, attacks, or saves, or deal extra 1d8 necrotic when you hit it.' },
+  { id:'glyph-of-warding',  name:'Glyph of warding',  level:3, school:'abjuration',   castTime:'1 hour',    range:'Touch',  duration:'Until triggered or dispelled', concentration:false, components:'V,S,M', description:'Inscribe a glyph that triggers a spell or an explosive rune when its trigger condition is met.' },
+  { id:'revivify',          name:'Revivify',          level:3, school:'necromancy',   castTime:'1 action',  range:'Touch',  duration:'Instantaneous', concentration:false, components:'V,S,M',    description:'A creature dead no longer than 1 minute returns to life with 1 HP. Cannot restore lost body parts.' },
+  { id:'fear',              name:'Fear',              level:3, school:'illusion',     castTime:'1 action',  range:'Self (30ft cone)', duration:'1 minute', concentration:true, components:'V,S,M', description:'Wis save or frightened and must drop items. Must Dash away each turn. Save at end of each turn to end.' },
+  // Level 4
+  { id:'death-ward',        name:'Death ward',        level:4, school:'abjuration',   castTime:'1 action',  range:'Touch',  duration:'8 hours',       concentration:false, components:'V,S',      description:'The next time the warded creature would drop to 0 HP, it drops to 1 HP instead. Consumed on trigger or when the duration ends.' },
+  { id:'dominate-beast',    name:'Dominate beast',    level:4, school:'enchantment',  castTime:'1 action',  range:'60ft',   duration:'1 minute',      concentration:true,  components:'V,S',      description:'Wis save or charmed. Bonus action commands. Repeat save each time it takes damage.' },
+  // Level 5
+  { id:'animate-objects',   name:'Animate objects',   level:5, school:'transmutation',castTime:'1 action',  range:'120ft',  duration:'1 minute',      concentration:true,  components:'V,S',      description:'Animate up to 10 nonmagical objects. They obey your commands. Stats depend on size (Tiny to Large).' },
+  { id:'awaken',            name:'Awaken',            level:5, school:'transmutation',castTime:'8 hours',   range:'Touch',  duration:'Instantaneous', concentration:false, components:'V,S,M',    description:'Bestow sentience on a beast or plant. It gains Int 13, can speak a language you know, and is charmed by you for 30 days.' },
+  { id:'contagion',         name:'Contagion',         level:5, school:'necromancy',   castTime:'1 action',  range:'Touch',  duration:'7 days',        concentration:false, components:'V,S',      description:'Melee spell attack. On hit, target is poisoned; after 3 failed Con saves it contracts a disease with a debilitating effect until cured.' },
+  { id:'dominate-person',   name:'Dominate person',   level:5, school:'enchantment',  castTime:'1 action',  range:'60ft',   duration:'1 minute',      concentration:true,  components:'V,S',      description:'Wis save or charmed humanoid. Bonus action commands. Repeat save each time it takes damage.' },
+  { id:'mislead',           name:'Mislead',           level:5, school:'illusion',     castTime:'1 action',  range:'Self',   duration:'1 hour',        concentration:true,  components:'S',        description:'Turn invisible and simultaneously create an illusory double of yourself. Control the double as it moves and talks.' },
+  { id:'modify-memory',     name:'Modify memory',     level:5, school:'enchantment',  castTime:'1 action',  range:'30ft',   duration:'1 minute',      concentration:true,  components:'V,S',      description:'Wis save or you reshape up to 10 minutes of the target\'s memories of the past 24 hours if it is incapacitated for the duration.' },
+  { id:'planar-binding',    name:'Planar binding',    level:5, school:'abjuration',   castTime:'1 hour',    range:'60ft',   duration:'24 hours',      concentration:false, components:'V,S,M',    description:'Bind a celestial, elemental, fey, or fiend to service. Cha save resists. Duration extends to 10 days/30 days/1 year at higher slot levels.' },
+  { id:'telekinesis',       name:'Telekinesis',       level:5, school:'transmutation',castTime:'1 action',  range:'60ft',   duration:'10 minutes',    concentration:true,  components:'V,S',      description:'Move or manipulate an object or creature at range. Creatures get a Str save to resist being moved.' },
+  { id:'teleportation-circle', name:'Teleportation circle', level:5, school:'conjuration', castTime:'1 minute', range:'10ft', duration:'1 round',      concentration:false, components:'V,M',      description:'Create a portal linked to a permanent teleportation circle you know, allowing travel between the two for 1 round.' },
+];
+
+// Full pool the Hexer can draw prepared spells from: wizard spells plus the
+// Hexer-only additions above. Matched against HEXER.spellList by name.
+export const HEXER_SPELL_SOURCE = [...WIZARD_SPELLS, ...HEXER_SPELLS];
+
 export function getSpellsForClass(classId, archetypeId) {
   if (classId === 'outlaw' && archetypeId === 'arcane-artillerist') return WIZARD_SPELLS;
   if (classId === 'shaman') return SHAMAN_SPELLS;
+  if (classId === 'hexer') return HEXER_SPELL_SOURCE;
   return [];
 }
 
