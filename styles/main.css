@@ -254,6 +254,7 @@ body {
   color: var(--text-dim);
 }
 .badge-gold { border-color: var(--gold-dim); color: var(--gold); background: var(--gold-glow); }
+.badge-danger { border-color: var(--red-dim); color: var(--red); background: rgba(192,57,43,0.12); }
 
 /* ─── Stat grid ──────────────────────────────────────────────────────────────── */
 .stat-grid {
