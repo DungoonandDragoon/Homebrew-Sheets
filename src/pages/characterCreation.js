@@ -798,6 +798,20 @@ export async function renderCharacterCreation(container, userId, navigate) {
             if (!draft.damageResistances) draft.damageResistances = [];
             draft.damageResistances.push(e.damageType);
           }
+
+          // ── Damage vulnerability (player choice) ────────────────────────
+          if (e.type === 'damage-vulnerability' && e.playerChoice) {
+            const pool = e.allowedChoices?.length ? e.allowedChoices
+              : ['Acid','Cold','Fire','Force','Lightning','Necrotic','Piercing','Poison','Psychic','Radiant','Slashing','Thunder'];
+            const label = `${hbSpecies.name}: choose a damage type you are vulnerable to`;
+            const chosen = await showSpeciesStatPickerModal(label, {}, 1, 0, [], pool);
+            if (!chosen) return;
+            if (!draft.damageVulnerabilities) draft.damageVulnerabilities = [];
+            draft.damageVulnerabilities.push(chosen[0]);
+          } else if (e.type === 'damage-vulnerability' && e.damageType) {
+            if (!draft.damageVulnerabilities) draft.damageVulnerabilities = [];
+            draft.damageVulnerabilities.push(e.damageType);
+          }
         }
       }
 
