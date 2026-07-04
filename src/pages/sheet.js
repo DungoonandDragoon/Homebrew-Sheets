@@ -35,6 +35,8 @@ let homebrew = [];
 let activeTab = 'core';
 let saveTimer = null;
 let savePending = false;
+let saveRetryTimer = null;
+let saveRetryDelay = 3000; // backs off on repeated failures, capped below
 let userId = null;
 let isDM = false;
 let visibilityHandler = null;
@@ -48,14 +50,21 @@ function scheduleAutoSave() {
 
 async function doSave() {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  if (saveRetryTimer) { clearTimeout(saveRetryTimer); saveRetryTimer = null; }
   if (!savePending || !char) return;
   savePending = false;
   try {
     await saveCharacter({ ...char, data }, userId);
+    saveRetryDelay = 3000; // reset backoff after a success
+    hideSaveError();
   } catch (e) {
     console.error('Auto-save failed', e);
-    savePending = true; // keep it marked dirty so a later flush retries
-    showMsg('⚠ Save failed — check your connection. Retrying…');
+    savePending = true; // keep it marked dirty so a retry picks it up
+    showSaveError(e.message || 'Unknown error');
+    // Actually retry automatically (with backoff) instead of just claiming to —
+    // waiting for the player's next edit isn't good enough if they've stopped.
+    saveRetryTimer = setTimeout(doSave, saveRetryDelay);
+    saveRetryDelay = Math.min(saveRetryDelay * 2, 30000);
   }
 }
 
@@ -66,6 +75,34 @@ async function doSave() {
 export async function flushPendingSave() {
   if (!savePending) return;
   await doSave();
+}
+
+// A save failure is important enough that it shouldn't be a toast that
+// disappears in 2.5s — show a persistent banner with the real error message
+// until the save actually succeeds, plus a manual retry button.
+function showSaveError(message) {
+  let el = document.getElementById('save-error-banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'save-error-banner';
+    el.style.cssText = 'position:fixed; bottom:1.5rem; left:1.5rem; right:1.5rem; max-width:520px; ' +
+      'background:rgba(192,57,43,0.15); border:1px solid var(--red-dim); border-radius:var(--radius); ' +
+      'padding:0.75rem 1rem; font-size:0.85rem; color:var(--text); z-index:999; display:flex; ' +
+      'align-items:center; gap:0.75rem; flex-wrap:wrap;';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `
+    <span style="flex:1; min-width:200px;"><strong style="color:var(--red);">⚠ Save failed:</strong> ${message}</span>
+    <button class="btn btn-sm" id="save-error-retry">Retry now</button>
+  `;
+  document.getElementById('save-error-retry')?.addEventListener('click', () => {
+    savePending = true;
+    doSave();
+  });
+}
+
+function hideSaveError() {
+  document.getElementById('save-error-banner')?.remove();
 }
 
 function mutate(fn) {
