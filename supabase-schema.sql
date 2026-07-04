@@ -42,31 +42,60 @@ alter table characters enable row level security;
 alter table homebrew    enable row level security;
 alter table dm_users    enable row level security;
 
+-- Helper function: is the current user a DM? SECURITY DEFINER so it reads
+-- dm_users directly (bypassing dm_users' own RLS) instead of nesting a
+-- second RLS-protected subquery inside every homebrew/characters policy —
+-- this avoids any ambiguity about how Postgres evaluates nested RLS checks
+-- and makes the DM check a single, easy-to-audit place.
+create or replace function public.is_dm()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (select 1 from dm_users where user_id = auth.uid());
+$$;
+
 -- Characters: players can CRUD their own
+drop policy if exists "Players manage own characters" on characters;
 create policy "Players manage own characters"
   on characters for all
   using  (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
 -- Characters: DMs can read all
+drop policy if exists "DMs read all characters" on characters;
 create policy "DMs read all characters"
   on characters for select
-  using (
-    exists (select 1 from dm_users where user_id = auth.uid())
-  );
+  using (public.is_dm());
 
 -- Homebrew: anyone logged in can read
+drop policy if exists "Anyone reads homebrew" on homebrew;
 create policy "Anyone reads homebrew"
   on homebrew for select
   using (auth.uid() is not null);
 
--- Homebrew: only DMs can write
-create policy "DMs write homebrew"
-  on homebrew for all
-  using  (exists (select 1 from dm_users where user_id = auth.uid()))
-  with check (exists (select 1 from dm_users where user_id = auth.uid()));
+-- Homebrew: only DMs can write — split into explicit per-command policies
+-- (rather than one 'for all' policy) so each operation's permission is
+-- unambiguous and easy to verify in the Supabase dashboard.
+drop policy if exists "DMs write homebrew" on homebrew;
+drop policy if exists "DMs insert homebrew" on homebrew;
+drop policy if exists "DMs update homebrew" on homebrew;
+drop policy if exists "DMs delete homebrew" on homebrew;
+create policy "DMs insert homebrew"
+  on homebrew for insert
+  with check (public.is_dm());
+create policy "DMs update homebrew"
+  on homebrew for update
+  using (public.is_dm())
+  with check (public.is_dm());
+create policy "DMs delete homebrew"
+  on homebrew for delete
+  using (public.is_dm());
 
 -- DM users: only DMs can read (to check their own status)
+drop policy if exists "DMs read dm_users" on dm_users;
 create policy "DMs read dm_users"
   on dm_users for select
   using (auth.uid() = user_id);
