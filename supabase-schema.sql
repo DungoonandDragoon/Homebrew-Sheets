@@ -70,6 +70,16 @@ create policy "DMs read all characters"
   on characters for select
   using (public.is_dm());
 
+-- Characters: DMs can also update any character — the DM View lets a DM open
+-- and edit a player's sheet directly (HP overrides, granting feats, etc.),
+-- and without this policy those edits are silently rejected by RLS because
+-- the DM isn't the row's user_id.
+drop policy if exists "DMs update any character" on characters;
+create policy "DMs update any character"
+  on characters for update
+  using (public.is_dm())
+  with check (public.is_dm());
+
 -- Homebrew: anyone logged in can read
 drop policy if exists "Anyone reads homebrew" on homebrew;
 create policy "Anyone reads homebrew"
