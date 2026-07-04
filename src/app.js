@@ -57,30 +57,36 @@ async function render() {
   renderExtensionBanner();
 
   // Wire nav buttons
-  function cleanupSheet() {
+  async function cleanupSheet() {
+    // Flush any pending (debounced) character save before we leave the sheet,
+    // so a quick nav click right after an edit can't lose that edit.
+    try { await window._hbsFlushSave?.(); } catch (_) { /* already surfaced in sheet.js */ }
     if (window._hbsRealtimeChannel) {
       window._hbsRealtimeChannel.unsubscribe();
       window._hbsRealtimeChannel = null;
     }
   }
 
-  document.getElementById('nav-chars')?.addEventListener('click', () => {
-    cleanupSheet();
+  document.getElementById('nav-chars')?.addEventListener('click', async () => {
+    await cleanupSheet();
     appState.playerViewActive = false;
     navigate('characters');
   });
   document.getElementById('nav-signout')?.addEventListener('click', async () => {
+    await cleanupSheet();
     await signOut();
     appState.session = null;
     appState.userIsDM = false;
     appState.playerViewActive = false;
     navigate('login');
   });
-  document.getElementById('nav-dm')?.addEventListener('click', () => {
+  document.getElementById('nav-dm')?.addEventListener('click', async () => {
+    await cleanupSheet();
     appState.playerViewActive = false;
     navigate('dm');
   });
-  document.getElementById('nav-hb')?.addEventListener('click', () => {
+  document.getElementById('nav-hb')?.addEventListener('click', async () => {
+    await cleanupSheet();
     appState.playerViewActive = false;
     navigate('homebrew-editor');
   });
