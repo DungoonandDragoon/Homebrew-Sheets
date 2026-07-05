@@ -1001,6 +1001,38 @@ function renderNerveTab(tc) {
   });
 }
 
+// Built-in class features whose description has its own "usable X times per
+// rest" clause (e.g. Communicable Curse), separate from the class's main
+// resource pool (Sigils, Biomass, Nerve Dice, etc). Each maps to one or more
+// tracked resources so they get the same Use-button pip tracking as homebrew
+// limited-use effects and feats.
+const CLASS_FEATURE_LIMITS = {
+  // Hexer
+  'malevolent-mark':       [{ recharge: 'short', max: () => Math.max(1, derived.mods.intelligence) }],
+  'communicable-curse':    [{ recharge: 'short', max: () => Math.max(1, derived.mods.intelligence) }],
+  'unbridled-torment':     [{ recharge: 'long',  max: () => Math.max(1, derived.mods.intelligence) }],
+  // Mutator
+  'organic-fortitude':     [
+    { label: 'Reroll a failed save', recharge: 'short', max: () => 1 },
+    { label: 'Reactive damage reduction', recharge: 'long', max: () => Math.max(1, derived.prof) },
+  ],
+  'reflexive-blow':        [{ recharge: 'short', max: () => 1 }],
+  'resistant-sinews':      [{ recharge: 'long',  max: () => 1 }],
+  'transcendant-mutation': [{ recharge: 'long',  max: () => 1 }],
+  'primal-infusion':       [{ recharge: 'long',  max: () => Math.max(1, derived.mods.constitution) }],
+  'apex-mutation':         [{ recharge: 'short', max: () => 1 }],
+  'weave-clot':            [{ recharge: 'long',  max: () => Math.max(1, derived.mods.intelligence) }],
+  'complete-control':      [{ recharge: 'long',  max: () => Math.max(1, derived.mods.intelligence) }],
+};
+
+function getUnlockedClassFeatures() {
+  return char.class_id === 'mutator'
+    ? getMutatorUnlockedFeatures(char.level, data.evolutionId)
+    : char.class_id === 'hexer'
+    ? getHexerUnlockedFeatures(char.level, data.disciplineId)
+    : getUnlockedFeatures(char.level, data.archetypeId);
+}
+
 // ── Limited-use resource tracking (feats / species / subspecies traits) ───────
 // Any homebrew 'limited-use' effect (abilityName, uses, recharge) gets a
 // per-character use counter here, keyed off a stable path to where the effect
@@ -1030,6 +1062,23 @@ function collectLimitedUseResources() {
   (data.feats || []).forEach((f, fi) => {
     (f.effects || []).forEach((e, ei) => {
       if (e.type === 'limited-use') attach(f, e, `feat:${f.id || f.name || fi}:${ei}`);
+    });
+  });
+
+  // Built-in class features with their own limited-use clause (see
+  // CLASS_FEATURE_LIMITS above) — e.g. Communicable Curse, Reflexive Blow.
+  getUnlockedClassFeatures().forEach(f => {
+    const configs = CLASS_FEATURE_LIMITS[f.id];
+    if (!configs) return;
+    configs.forEach((cfg, ci) => {
+      const key = `classFeature:${f.id}:${ci}`;
+      const max = Math.max(1, cfg.max());
+      const used = (data.featResourceUses || {})[key] || 0;
+      const r = { key, max, used, name: cfg.label || f.name, recharge: cfg.recharge, remaining: Math.max(0, max - used) };
+      resources.push(r);
+      const list = byOwner.get(f) || [];
+      list.push(r);
+      byOwner.set(f, list);
     });
   });
 
@@ -1144,6 +1193,7 @@ function renderFeaturesTab(tc) {
             <span class="feature-level">Level ${f.level}</span>
           </div>
           <div class="feature-desc">${desc}</div>
+          ${renderResourceWidgets(limitedUseByOwner.get(f))}
         </div>
       `;
     }).join('')}
