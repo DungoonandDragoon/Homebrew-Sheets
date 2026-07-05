@@ -8,7 +8,7 @@ function getClassDef(classId) {
   if (classId === 'hexer')   return HEXER;
   return OUTLAW;
 }
-import { maxHP } from '../lib/calculations.js';
+import { maxHP, getClassHitDie } from '../lib/calculations.js';
 
 const CLASSES = [
   { id: 'outlaw',  name: 'Outlaw',  hitDie: 10, description: 'A ranged martial who wins fights through speed, nerve, and precision.' },
@@ -508,7 +508,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
     }
 
     if (step === 6) {
-      const hp = maxHP({ level: draft.level, abilities: draft.abilities, classId: draft.classId });
+      const hp = maxHP({ level: draft.level, abilities: draft.abilities, classId: draft.classId, classHitDie: getClassHitDie(draft.classId) });
       html += `
         <div class="card">
           <div class="card-title">Final details</div>
