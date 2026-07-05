@@ -812,6 +812,11 @@ export async function renderCharacterCreation(container, userId, navigate) {
             if (!draft.damageVulnerabilities) draft.damageVulnerabilities = [];
             draft.damageVulnerabilities.push(e.damageType);
           }
+
+          // ── Attunement slot adjustment (fixed, not a player choice) ─────
+          if (e.type === 'attunement-slots') {
+            draft.attunementSlotBonus = (draft.attunementSlotBonus || 0) + (parseInt(e.amount) || 0);
+          }
         }
       }
 
