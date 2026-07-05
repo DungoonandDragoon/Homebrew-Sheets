@@ -13,6 +13,14 @@ export function profBonus(level) {
   return Math.ceil(level / 4) + 1;
 }
 
+// Single source of truth for each class's hit die — used anywhere maxHP()
+// is computed, so a caller can never accidentally fall back to the wrong
+// default (e.g. Hexer's d8 silently defaulting to d10).
+export function getClassHitDie(classId) {
+  const hitDice = { outlaw: 10, mutator: 10, hexer: 8 };
+  return hitDice[classId] || 10;
+}
+
 // Calculate all derived stats for an Outlaw character
 export function deriveStats(character) {
   const {
