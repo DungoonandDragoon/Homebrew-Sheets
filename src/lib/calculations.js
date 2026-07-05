@@ -161,11 +161,14 @@ export function deriveStats(character) {
   // Speed — base 30, modified by feats
   const speed = 30 + featSpeedBonus + (customBonuses.speed || 0);
 
+  // Attunement — 5e base of 3 slots, adjustable up or down by feats/species
+  const attunementMax = Math.max(0, 3 + (character.attunementSlotBonus || 0));
+
   return {
     prof, mods, initiativeBonus, ac, saves, skills,
     passivePerception, spellSaveDC, spellAttackBonus,
     trickShotDC, calledShotDC, suppressingFireDC, showstopperDC, nerveDice, recklessFusillade,
-    speed, damageResistances, damageVulnerabilities, conditionImmunities,
+    speed, damageResistances, damageVulnerabilities, conditionImmunities, attunementMax,
     mutationSaveDC, mutatorSpellSaveDC, mutatorSpellAttackBonus,
     curseSaveDC, hexerSpellSaveDC, hexerSpellAttackBonus,
   };
