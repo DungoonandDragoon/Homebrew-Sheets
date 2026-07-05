@@ -135,6 +135,7 @@ function buildCharacterForCalc() {
     featSpeedBonus: data.speedBonus || 0,
     damageResistances: data.damageResistances || [],
     damageVulnerabilities: data.damageVulnerabilities || [],
+    attunementSlotBonus: data.attunementSlotBonus || 0,
     conditionImmunities: data.conditionImmunities || [],
   };
 }
@@ -1422,12 +1423,15 @@ function getBuiltinSpeciesTraits(speciesId) {
 function renderInventoryTab(tc) {
   const inv = data.inventory || [];
   const hbItems = homebrew.filter(h => h.type === 'item');
+  const attunedIds = data.attunedItemIds || [];
+  const attunementMax = derived.attunementMax ?? 3;
 
   tc.innerHTML = `
     <div class="card" style="margin-bottom:1rem;">
       <div class="section-header">
         <div class="card-title" style="margin:0;">Inventory</div>
-        <div style="display:flex; gap:0.4rem;">
+        <div style="display:flex; gap:0.4rem; align-items:center;">
+          <span style="font-size:0.8rem; color:var(--text-dim); margin-right:0.25rem;">Attuned: <strong style="color:var(--gold);">${attunedIds.length}</strong> / ${attunementMax}</span>
           <button class="btn btn-sm" id="add-item-builtin">+ Add item</button>
           <button class="btn btn-sm" id="add-item-custom">+ Custom</button>
         </div>
@@ -1502,7 +1506,35 @@ function renderInventoryTab(tc) {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       if (!confirm('Remove item?')) return;
-      mutate(() => { data.inventory = data.inventory.filter(i => i.id !== btn.dataset.id); });
+      mutate(() => {
+        data.inventory = data.inventory.filter(i => i.id !== btn.dataset.id);
+        if (data.attunedItemIds) data.attunedItemIds = data.attunedItemIds.filter(id => id !== btn.dataset.id);
+      });
+    });
+  });
+
+  // View item details
+  tc.querySelectorAll('.inv-view').forEach(el => {
+    el.addEventListener('click', () => {
+      const item = (data.inventory || []).find(i => i.id === el.dataset.id);
+      if (item) showItemDetailModal(item);
+    });
+  });
+
+  // Attune / unattune
+  tc.querySelectorAll('.attune-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      const currentlyAttuned = (data.attunedItemIds || []).includes(id);
+      if (!currentlyAttuned && (data.attunedItemIds || []).length >= (derived.attunementMax ?? 3)) {
+        showMsg(`⚠ Already attuned to ${derived.attunementMax ?? 3} items — unattune something first.`);
+        return;
+      }
+      mutate(() => {
+        data.attunedItemIds = currentlyAttuned
+          ? (data.attunedItemIds || []).filter(x => x !== id)
+          : [...(data.attunedItemIds || []), id];
+      });
     });
   });
 
@@ -1548,6 +1580,57 @@ function renderInventoryTab(tc) {
   document.getElementById('add-item-custom')?.addEventListener('click', () => showAddItemModal(hbItems, true));
 }
 
+// Generic "view details" modal — used so players can see the full
+// description of a homebrew item or a spell without having to guess what it
+// does from just a name and a one-line stat summary.
+function showDetailModal(title, metaHtml, bodyHtml) {
+  document.getElementById('detail-modal-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'detail-modal-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:520px;">
+      <div class="modal-title">${title}</div>
+      ${metaHtml ? `<div style="font-size:0.82rem; color:var(--text-dim); margin-bottom:0.75rem; line-height:1.5;">${metaHtml}</div>` : ''}
+      <div style="font-size:0.9rem; color:var(--text); line-height:1.6; white-space:pre-wrap;">${bodyHtml || '<span style="color:var(--text-muted);">No description was given for this.</span>'}</div>
+      <div class="modal-footer"><button class="btn" id="detail-close">Close</button></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#detail-close')?.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+}
+
+function showItemDetailModal(item) {
+  const metaParts = [];
+  if (item.damage) metaParts.push(`${item.damage} ${item.damageType || ''}`.trim());
+  if (item.range) metaParts.push(`Range ${item.range}`);
+  if (item.baseAC) metaParts.push(`AC ${item.baseAC}${item.armorType ? ` (${item.armorType})` : ''}`);
+  if (item.weaponType) metaParts.push(item.weaponType);
+  if (item.extraDamage) metaParts.push(`+${item.extraDamage}`);
+  if (item.properties?.length) metaParts.push(item.properties.join(', '));
+  if (parseInt(item.maxCharges) > 0) metaParts.push(`${item.maxCharges} charges${item.chargeRecharge ? `, recharges ${item.chargeRecharge === 'dawn' ? 'daily at dawn' : item.chargeRecharge + ' rest'}` : ''}`);
+  if (item.requiresAttunement) metaParts.push(`<strong style="color:var(--gold);">Requires attunement${item.attunementRequirement ? ` (${item.attunementRequirement})` : ''}</strong>`);
+  const description = item.description || item.detail || '';
+  showDetailModal(item.name, metaParts.join(' · '), description ? escapeHtmlKeepBreaks(description) : '');
+}
+
+function showSpellDetailModal(s) {
+  const metaParts = [
+    s.level === 0 ? 'Cantrip' : `Level ${s.level}`,
+    s.school,
+    s.castTime,
+    s.range,
+    s.duration + (s.concentration ? ' (concentration)' : ''),
+    s.components,
+  ].filter(Boolean);
+  showDetailModal(s.name, metaParts.join(' · '), s.description ? escapeHtmlKeepBreaks(s.description) : '');
+}
+
+function escapeHtmlKeepBreaks(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function renderInvRow(item) {
   const isWeapon = item.weaponType || item.damage;
   const isArmor = item.armorType;
@@ -1558,6 +1641,7 @@ function renderInvRow(item) {
     : item.equipped;
   const hasCharges = parseInt(item.maxCharges) > 0;
   const charges = hasCharges ? Math.max(0, Math.min(item.maxCharges, item.charges ?? item.maxCharges)) : 0;
+  const isAttuned = (data.attunedItemIds || []).includes(item.id);
 
   return `<div class="inv-row">
     ${(isWeapon || isArmor || isShield)
@@ -1565,8 +1649,16 @@ function renderInvRow(item) {
       : `<div style="width:10px;"></div>`
     }
     <div style="flex:1;">
-      <div class="inv-name">${item.name}</div>
+      <div class="inv-name inv-view" data-id="${item.id}" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;" title="View details">${item.name} <span style="font-size:0.7rem; color:var(--text-muted);">ⓘ</span></div>
       <div class="inv-detail">${item.detail || (isArmor ? `AC ${item.baseAC} (${item.armorType})` : item.damage ? `${item.damage} ${item.damageType||''}` : '')}</div>
+      ${item.requiresAttunement ? `
+        <div style="margin-top:0.35rem;">
+          <button class="btn btn-sm attune-toggle ${isAttuned ? 'btn-gold' : ''}" data-id="${item.id}">
+            ${isAttuned ? '★ Attuned' : '☆ Requires attunement — attune'}
+          </button>
+          ${item.attunementRequirement ? `<span style="font-size:0.75rem; color:var(--text-muted); margin-left:0.4rem;">(${item.attunementRequirement})</span>` : ''}
+        </div>` : ''
+      }
       ${hasCharges ? `
         <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.35rem; flex-wrap:wrap;">
           <div class="slot-pips">
@@ -1662,6 +1754,15 @@ function showAddItemModal(hbItems, customMode) {
       </div>
       <div class="form-group"><label>Extra damage dice (e.g. 1d6 fire for magic weapon)</label><input class="form-input" id="ci-extra" placeholder="1d6 Fire" /></div>
       <div class="form-group"><label>Max charges (optional — e.g. a wand with 7 charges)</label><input class="form-input" type="number" id="ci-maxcharges" min="0" placeholder="0 = no charges" /></div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label>Requires attunement</label>
+          <select class="form-select" id="ci-attunement">
+            <option value="">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Attunement requirement (optional note)</label><input class="form-input" id="ci-attunement-req" placeholder="e.g. by a spellcaster" /></div>
+      </div>
       <div class="form-group"><label>Notes / description</label><input class="form-input" id="ci-detail" placeholder="Optional details" /></div>
       <div class="modal-footer">
         <button class="btn" id="ci-cancel">Cancel</button>
@@ -1677,6 +1778,8 @@ function showAddItemModal(hbItems, customMode) {
             <div>
               <div class="dm-char-name">${item.name}</div>
               <div class="dm-char-meta">${item.damage ? item.damage + ' ' + (item.damageType||'') : item.baseAC ? 'AC ' + item.baseAC + ' (' + item.armorType + ')' : item.detail||''}</div>
+              ${item.requiresAttunement ? `<div style="font-size:0.75rem; color:var(--gold); margin-top:0.15rem;">Requires attunement${item.attunementRequirement ? ` (${item.attunementRequirement})` : ''}</div>` : ''}
+              ${item.description ? `<div style="font-size:0.78rem; color:var(--text-dim); margin-top:0.25rem; max-width:420px;">${item.description}</div>` : ''}
             </div>
           </div>
         `).join('')}
@@ -1725,6 +1828,8 @@ function showAddItemModal(hbItems, customMode) {
       armorType: document.getElementById('ci-armortype')?.value || null,
       baseAC: parseInt(document.getElementById('ci-baseac')?.value) || 0,
       extraDamage: document.getElementById('ci-extra')?.value || null,
+      requiresAttunement: document.getElementById('ci-attunement')?.value === 'true',
+      attunementRequirement: document.getElementById('ci-attunement-req')?.value || null,
       detail: document.getElementById('ci-detail')?.value || null,
       quantity: 1,
       equipped: false,
@@ -1783,7 +1888,7 @@ function renderSpellsTab(tc) {
       ${cantrips.map(sid => {
         const s = cantripList.find(x => x.id === sid);
         if (!s) return '';
-        return `<div class="spell-row"><div class="spell-name">${s.name}</div><div class="spell-detail">${s.castTime} · ${s.range}</div><button class="btn btn-sm cast-btn" data-spell="${s.id}">Cast</button></div>`;
+        return `<div class="spell-row"><div class="spell-name">${s.name} <span class="spell-view" data-spell="${s.id}" title="View details" style="cursor:pointer; color:var(--text-muted); font-size:0.7rem;">ⓘ</span></div><div class="spell-detail">${s.castTime} · ${s.range}</div><button class="btn btn-sm cast-btn" data-spell="${s.id}">Cast</button></div>`;
       }).join('') || '<div style="color:var(--text-muted); font-size:0.85rem;">No cantrips selected.</div>'}
     </div>
     <div class="card">
@@ -1798,7 +1903,7 @@ function renderSpellsTab(tc) {
           <div style="font-family:var(--font-display); font-size:0.62rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.25rem;">Level ${l}</div>
           ${group.map(s => `
             <div class="spell-row">
-              <div class="spell-name">${s.name} ${s.concentration ? '<span class="spell-conc">C</span>' : ''}</div>
+              <div class="spell-name">${s.name} ${s.concentration ? '<span class="spell-conc">C</span>' : ''} <span class="spell-view" data-spell="${s.id}" title="View details" style="cursor:pointer; color:var(--text-muted); font-size:0.7rem;">ⓘ</span></div>
               <div class="spell-detail">${s.castTime} · ${s.range} · ${s.duration}</div>
               <button class="btn btn-sm cast-btn" data-spell="${s.id}" data-level="${s.level}">Cast</button>
             </div>
@@ -1826,6 +1931,14 @@ function renderSpellsTab(tc) {
 
   document.getElementById('manage-cantrips')?.addEventListener('click', () => showSpellPicker(cantripList, cantrips, 0, char.level >= 10 ? 3 : 2));
   document.getElementById('manage-spells')?.addEventListener('click', () => showSpellPicker(leveledSpells, prepared, -1, maxPrepared));
+
+  tc.querySelectorAll('.spell-view').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const spell = allSpells.find(s => s.id === el.dataset.spell);
+      if (spell) showSpellDetailModal(spell);
+    });
+  });
 
   tc.querySelectorAll('.cast-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2443,7 +2556,7 @@ function renderHexerSpellsTab(tc) {
           <div style="font-family:var(--font-display); font-size:0.62rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.25rem;">Level ${l}</div>
           ${group.map(s => `
             <div class="spell-row">
-              <div class="spell-name">${s.name} ${s.concentration ? '<span class="spell-conc">C</span>' : ''}</div>
+              <div class="spell-name">${s.name} ${s.concentration ? '<span class="spell-conc">C</span>' : ''} <span class="spell-view" data-spell="${s.id}" title="View details" style="cursor:pointer; color:var(--text-muted); font-size:0.7rem;">ⓘ</span></div>
               <div class="spell-detail">${s.castTime} · ${s.range} · ${s.duration}</div>
               <button class="btn btn-sm hcast-btn" data-spell="${s.id}" data-level="${s.level}">Cast</button>
             </div>
@@ -2458,7 +2571,10 @@ function renderHexerSpellsTab(tc) {
         if (!spells.length) return '';
         return `<div style="margin-bottom:0.6rem;">
           <div style="font-family:var(--font-display); font-size:0.62rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.2rem;">Level ${l}</div>
-          <div style="font-size:0.82rem; color:var(--text-dim);">${spells.join(', ')}</div>
+          <div style="font-size:0.82rem; color:var(--text-dim);">${spells.map(name => {
+            const found = HEXER_SPELL_SOURCE.find(x => x.name.toLowerCase().replace(/[^a-z]/g,'') === name.toLowerCase().replace(/[^a-z]/g,''));
+            return found ? `<span class="spell-view" data-spell="${found.id}" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:2px;">${name}</span>` : name;
+          }).join(', ')}</div>
         </div>`;
       }).join('')}
     </div>
@@ -2475,6 +2591,14 @@ function renderHexerSpellsTab(tc) {
         data.hexerSpellSlotsUsed[level] = pip.classList.contains('available')
           ? Math.min(max, used + 1) : Math.max(0, used - 1);
       });
+    });
+  });
+
+  tc.querySelectorAll('.spell-view').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const spell = HEXER_SPELL_SOURCE.find(s => s.id === el.dataset.spell);
+      if (spell) showSpellDetailModal(spell);
     });
   });
 
@@ -2560,7 +2684,7 @@ function renderMutatorSpellsTab(tc) {
         const s = cantripPool.find(x => x.id === sid);
         if (!s) return '';
         return `<div class="spell-row">
-          <div class="spell-name">${s.name}</div>
+          <div class="spell-name">${s.name} <span class="spell-view" data-spell="${s.id}" title="View details" style="cursor:pointer; color:var(--text-muted); font-size:0.7rem;">ⓘ</span></div>
           <div class="spell-detail">${s.castTime} · ${s.range}</div>
           <button class="btn btn-sm mcast-btn" data-spell="${s.id}">Cast</button>
         </div>`;
@@ -2578,7 +2702,7 @@ function renderMutatorSpellsTab(tc) {
           <div style="font-family:var(--font-display); font-size:0.62rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-muted); margin-bottom:0.25rem;">Level ${l}</div>
           ${group.map(s => `
             <div class="spell-row">
-              <div class="spell-name">${s.name} ${s.concentration ? '<span class="spell-conc">C</span>' : ''}</div>
+              <div class="spell-name">${s.name} ${s.concentration ? '<span class="spell-conc">C</span>' : ''} <span class="spell-view" data-spell="${s.id}" title="View details" style="cursor:pointer; color:var(--text-muted); font-size:0.7rem;">ⓘ</span></div>
               <div class="spell-detail">${s.castTime} · ${s.range} · ${s.duration}</div>
               <button class="btn btn-sm mcast-btn" data-spell="${s.id}" data-level="${s.level}">Cast</button>
             </div>
@@ -2614,6 +2738,14 @@ function renderMutatorSpellsTab(tc) {
   document.getElementById('manage-mutator-spells')?.addEventListener('click', () => {
     showSpellPicker(leveledSpells, prepared, -1, maxPrepared, (picked) => {
       mutate(() => { data.mutatorSpells = picked; });
+    });
+  });
+
+  tc.querySelectorAll('.spell-view').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const spell = allSpells.find(s => s.id === el.dataset.spell);
+      if (spell) showSpellDetailModal(spell);
     });
   });
 
@@ -3430,6 +3562,10 @@ function applyFeatEffects(effects, resolvedChoices) {
         data.damageVulnerabilities = data.damageVulnerabilities || [];
         if (!data.damageVulnerabilities.includes(dmg)) data.damageVulnerabilities.push(dmg);
       }
+    }
+
+    if (e.type === 'attunement-slots') {
+      data.attunementSlotBonus = (data.attunementSlotBonus || 0) + (parseInt(e.amount) || 0);
     }
 
     if (e.type === 'ac-bonus' && e.amount)         data.acBonus      = (data.acBonus || 0) + parseInt(e.amount);
