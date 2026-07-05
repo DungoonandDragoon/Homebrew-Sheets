@@ -12,6 +12,7 @@ const EFFECT_TYPES = [
   { value: 'ac-bonus',            label: 'AC bonus' },
   { value: 'initiative-bonus',    label: 'Initiative bonus' },
   { value: 'speed-bonus',         label: 'Speed bonus' },
+  { value: 'attunement-slots',    label: 'Attunement slots (+/-)' },
   { value: 'damage-resistance',   label: 'Damage resistance' },
   { value: 'damage-vulnerability',label: 'Damage vulnerability' },
   { value: 'condition-immunity',  label: 'Condition immunity' },
@@ -128,10 +129,10 @@ export async function renderHomebrewEditor(container) {
     // Types with no fixed target (always shown regardless of playerChoice)
     if (effect.type === 'language-choice') {
       // no fixed target — language choice is always player-driven
-    } else if (['ac-bonus', 'initiative-bonus', 'speed-bonus'].includes(effect.type)) {
+    } else if (['ac-bonus', 'initiative-bonus', 'speed-bonus', 'attunement-slots'].includes(effect.type)) {
       detail = `
         <input class="form-input eff-detail" data-idx="${idx}" data-key="amount"
-          type="number" value="${effect.amount || 1}" style="width:70px;" placeholder="Amount" title="Use a negative number for a penalty (e.g. -2)" />`;
+          type="number" value="${effect.amount || 1}" style="width:70px;" placeholder="Amount" title="Use a negative number to remove slots (e.g. -1)" />`;
     } else if (effect.type === 'condition-immunity') {
       detail = `
         <select class="form-select eff-detail" data-idx="${idx}" data-key="condition">
@@ -347,6 +348,19 @@ export async function renderHomebrewEditor(container) {
                 <option value="long" ${item.data.chargeRecharge === 'long' ? 'selected' : ''}>Long rest</option>
                 <option value="short" ${item.data.chargeRecharge === 'short' ? 'selected' : ''}>Short rest</option>
               </select>
+            </div>
+          </div>
+          <div class="form-row cols-2">
+            <div class="form-group">
+              <label>Requires attunement</label>
+              <select class="form-select" id="hb-requires-attunement">
+                <option value="">No</option>
+                <option value="true" ${item.data.requiresAttunement ? 'selected' : ''}>Yes</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Attunement requirement (optional, not mechanical — just shown as a note)</label>
+              <input class="form-input" id="hb-attunement-req" value="${item.data.attunementRequirement || ''}" placeholder="e.g. by a spellcaster" />
             </div>
           </div>
           <div class="form-group">
@@ -811,6 +825,8 @@ export async function renderHomebrewEditor(container) {
           item.data.armorType   = document.getElementById('hb-armor-type')?.value;
           item.data.maxCharges     = parseInt(document.getElementById('hb-max-charges')?.value) || 0;
           item.data.chargeRecharge = document.getElementById('hb-charge-recharge')?.value || null;
+          item.data.requiresAttunement   = document.getElementById('hb-requires-attunement')?.value === 'true';
+          item.data.attunementRequirement = document.getElementById('hb-attunement-req')?.value || null;
           item.data.properties  = document.getElementById('hb-props')?.value.split(',').map(s => s.trim()).filter(Boolean) || [];
         }
 
