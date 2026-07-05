@@ -1,5 +1,5 @@
 import { getAllCharacters } from '../lib/db.js';
-import { maxHP } from '../lib/calculations.js';
+import { maxHP, getClassHitDie } from '../lib/calculations.js';
 
 export async function renderDMView(container, navigate) {
   container.innerHTML = `<div style="color:var(--text-muted); padding:2rem; text-align:center;">Loading all characters…</div>`;
@@ -15,7 +15,7 @@ export async function renderDMView(container, navigate) {
   const rows = characters.map(c => {
     const data = c.data || {};
     const hp = data.currentHP ?? 0;
-    const mhp = maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id });
+    const mhp = maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id, classHitDie: getClassHitDie(c.class_id) });
     const pct = Math.max(0, Math.min(100, Math.round(hp / mhp * 100)));
     const archName = data.archetypeName || data.evolutionName || data.disciplineName || '';
     const conditions = (data.conditions || []).join(', ') || '—';
