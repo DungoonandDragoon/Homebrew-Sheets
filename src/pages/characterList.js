@@ -1,5 +1,5 @@
 import { getMyCharacters, deleteCharacter } from '../lib/db.js';
-import { maxHP } from '../lib/calculations.js';
+import { maxHP, getClassHitDie } from '../lib/calculations.js';
 
 export async function renderCharacterList(container, userId, navigate) {
   container.innerHTML = `<div style="text-align:center; padding:3rem; color:var(--text-muted);">Loading characters…</div>`;
@@ -15,8 +15,8 @@ export async function renderCharacterList(container, userId, navigate) {
   function render() {
     const grid = characters.map(c => {
       const data = c.data || {};
-      const hp = data.currentHP ?? maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id });
-      const mhp = maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id });
+      const hp = data.currentHP ?? maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id, classHitDie: getClassHitDie(c.class_id) });
+      const mhp = maxHP({ level: c.level, abilities: data.abilities || {}, classId: c.class_id, classHitDie: getClassHitDie(c.class_id) });
       const pct = Math.max(0, Math.min(100, Math.round(hp / mhp * 100)));
       const subclassName = data.archetypeName || data.evolutionName || data.disciplineName || '';
       return `
