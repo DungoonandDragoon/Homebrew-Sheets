@@ -1,5 +1,5 @@
 import { getCharacter, saveCharacter, getAllHomebrew, supabase } from '../lib/db.js';
-import { deriveStats, maxHP, getMisfireScore, weaponAttack, shortRestNerveDiceRecovery,
+import { deriveStats, maxHP, getMisfireScore, weaponAttack, shortRestNerveDiceRecovery, getClassHitDie,
          SKILL_LABELS, SKILL_ABILITY_LABELS, ABILITY_LABELS, CONDITIONS, formatMod } from '../lib/calculations.js';
 import { OUTLAW, getProgression, getUnlockedFeatures, getNerveDice } from '../lib/classes/outlaw.js';
 import { MUTATOR, getMutatorProgression, getMutatorUnlockedFeatures, getAvailableMutations, getMutatorSpellSlots, getMaxActiveMutations } from '../lib/classes/mutator.js';
@@ -141,10 +141,7 @@ function buildCharacterForCalc() {
 }
 
 // Returns the hit die size for a given class ID — extend as classes are added
-function getClassHitDie(classId) {
-  const hitDice = { outlaw: 10, mutator: 10, hexer: 8 };
-  return hitDice[classId] || 10;
-}
+// getClassHitDie now lives in calculations.js (single source of truth — see import above)
 
 // Merge base skill proficiencies with any granted by homebrew backgrounds
 function getEffectiveSkillProficiencies() {
@@ -270,7 +267,7 @@ function renderSheetUI() {
   const container = document.getElementById('page-content');
   if (!container) return;
 
-  const mhp = data.maxHPOverride || maxHP({ level: char.level, abilities: data.abilities, classId: char.class_id });
+  const mhp = data.maxHPOverride || maxHP({ level: char.level, abilities: data.abilities, classId: char.class_id, classHitDie: getClassHitDie(char.class_id) });
   const hp = data.currentHP ?? mhp;
   const hpPct = Math.max(0, Math.min(100, Math.round(hp / mhp * 100)));
   const hpClass = hpPct > 50 ? '' : hpPct > 25 ? ' low' : ' critical';
@@ -452,7 +449,16 @@ function renderSheetUI() {
         data.mutatorSpellSlotsUsed = {};
       }
     });
-    showMsg('Long rest complete. HP, Nerve Dice, spell slots, and hit dice restored.');
+    let restoredParts = ['HP', 'hit dice'];
+    if (char.class_id === 'outlaw') {
+      restoredParts.splice(1, 0, 'Nerve Dice');
+    } else if (char.class_id === 'hexer') {
+      restoredParts.splice(1, 0, 'Sigils', 'spell slots');
+      if (data.disciplineId === 'hellion') restoredParts.push('Arcane Release');
+    } else if (char.class_id === 'mutator') {
+      restoredParts.splice(1, 0, 'Biomass', 'Bioshocks', 'spell slots');
+    }
+    showMsg(`Long rest complete. ${restoredParts.join(', ').replace(/, ([^,]*)$/, ', and $1')} restored.`);
   });
 
   // Death saves
@@ -503,8 +509,23 @@ function renderSheetUI() {
 }
 
 // ── CORE TAB ──────────────────────────────────────────────────────────────────
+const CLASS_REFERENCE_LINKS = {
+  hexer:   'https://homebrewery.naturalcrit.com/share/p-XH4Ypy0B5_',
+  outlaw:  'https://homebrewery.naturalcrit.com/share/DN4MWqWTPSWv',
+  mutator: 'https://homebrewery.naturalcrit.com/share/j6WAaROnPLWn',
+};
+
 function renderCoreTab(tc) {
+  const classRefUrl = CLASS_REFERENCE_LINKS[char.class_id];
   tc.innerHTML = `
+    ${classRefUrl ? `
+      <div class="card" style="margin-bottom:1rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.5rem;">
+        <div style="font-size:0.85rem; color:var(--text-dim);">Full class rules on Homebrewery</div>
+        <a class="btn btn-sm btn-gold" href="${classRefUrl}" target="_blank" rel="noopener" style="text-decoration:none;">
+          📖 Open ${char.class_id.charAt(0).toUpperCase() + char.class_id.slice(1)} reference
+        </a>
+      </div>
+    ` : ''}
     <div class="grid-2" style="margin-bottom:1rem;">
       <div class="card">
         <div class="card-title">Ability scores</div>
@@ -2393,6 +2414,29 @@ function renderMutationsTab(tc) {
 }
 
 // ── CURSES TAB (Hexer only) ──────────────────────────────────────────────────
+// Some disciplines grant a unique curse of their own (e.g. Hellion's Curse of
+// the Uncontained Chaos) — these are always known once unlocked and don't
+// count toward the character's normal "curses known" total, so they're
+// tracked separately here and merged into the Curses tab once unlocked.
+const DISCIPLINE_CURSES = {
+  'runebriar': [{
+    id: 'curse-of-the-tortured-conduit',
+    name: 'Curse of the Tortured Conduit',
+    level: 7,
+    sigilCost: 1,
+    activation: 'Bonus action',
+    description: 'Must target a weapon you have equipped and are proficient in. The chosen weapon deals an additional 1d6 force damage and you regain hit points equal to the additional force damage dealt. Lasts for one short or long rest and may only be applied to one weapon at a time.',
+  }],
+  'hellion': [{
+    id: 'curse-of-the-uncontained-chaos',
+    name: 'Curse of the Uncontained Chaos',
+    level: 7,
+    sigilCost: 3,
+    activation: 'Action',
+    description: 'Select one other curse you know at random and inscribe it into the target for no additional Sigil cost. From 11th level, when used with Communicable Curse, select one additional target and all targets subtract 1d4 from their saving throw roll. When this curse spreads to additional targets, a different random known curse is selected for each.',
+  }],
+};
+
 function renderCursesTab(tc) {
   const prog         = getHexerProgression(char.level);
   const maxSigils    = prog?.sigils || 2;
@@ -2408,6 +2452,11 @@ function renderCursesTab(tc) {
   const arcaneReleaseMax = Math.max(1, intMod);
   const arcaneReleaseUsed = data.arcaneReleaseUsed || 0;
   const arcaneReleaseLeft = Math.max(0, arcaneReleaseMax - arcaneReleaseUsed);
+
+  // Discipline-unique curses (e.g. Curse of the Uncontained Chaos) — always
+  // known once the character's level meets the requirement, don't count
+  // toward maxKnown.
+  const disciplineCurses = (DISCIPLINE_CURSES[data.disciplineId] || []).filter(c => char.level >= c.level);
 
   let html = `
     <!-- Sigil pool -->
@@ -2444,6 +2493,31 @@ function renderCursesTab(tc) {
         <div class="card-title" style="margin:0;">Known curses (${knownCurses.length} / ${maxKnown})</div>
       </div>
       <p style="font-size:0.82rem; color:var(--text-dim); margin:0.4rem 0 0.75rem;">On a long rest you may swap one known curse for another.</p>
+      ${disciplineCurses.length > 0 ? `
+        <div style="display:flex; flex-direction:column; gap:0.5rem; margin-bottom:0.75rem;">
+          ${disciplineCurses.map(c => {
+            const canAfford = sigilsLeft >= c.sigilCost;
+            return `
+              <div style="border:1px solid var(--gold-dim); border-radius:var(--radius); padding:0.6rem 0.75rem; background:var(--gold-glow);">
+                <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+                  <div style="flex:1; min-width:0;">
+                    <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                      <span style="font-weight:500;">${c.name}</span>
+                      <span class="badge badge-gold" style="font-size:0.65rem;">Discipline curse</span>
+                      <span style="font-size:0.75rem; color:var(--text-muted);">${c.sigilCost} Sigil${c.sigilCost !== 1 ? 's' : ''}</span>
+                      <span style="font-size:0.75rem; color:var(--text-muted);">${c.activation}</span>
+                    </div>
+                    <div style="font-size:0.82rem; color:var(--text-dim); margin-top:0.2rem;">${c.description}</div>
+                  </div>
+                  <button class="btn btn-sm curse-use ${canAfford ? 'btn-gold' : ''}"
+                    data-id="${c.id}" data-cost="${c.sigilCost}" ${!canAfford ? 'disabled' : ''}>
+                    Use (${c.sigilCost})
+                  </button>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+      ` : ''}
       <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:0.25rem;">
         ${allCurses.map(c => {
           const isKnown = knownCurses.includes(c.id);
@@ -2523,7 +2597,7 @@ function renderCursesTab(tc) {
   tc.querySelectorAll('.curse-use').forEach(btn => {
     btn.addEventListener('click', () => {
       const cost = parseInt(btn.dataset.cost);
-      const curse = allCurses.find(c => c.id === btn.dataset.id);
+      const curse = allCurses.find(c => c.id === btn.dataset.id) || disciplineCurses.find(c => c.id === btn.dataset.id);
       mutate(() => { data.sigilsUsed = Math.min(maxSigils, (data.sigilsUsed || 0) + cost); });
       const msg = curse
         ? `${curse.name} — ${cost} Sigil${cost !== 1 ? 's' : ''} spent. DC ${curseDC}${curse.saveType ? ' ' + curse.saveType + ' save' : ''}.`
@@ -3103,7 +3177,10 @@ function showShortRestModal() {
     if (char.class_id === 'hexer' && data.disciplineId === 'hellion') {
       mutate(() => { data.arcaneReleaseUsed = 0; });
     }
-    showMsg(`Short rest: spent ${diceToSpend} hit ${diceToSpend === 1 ? 'die' : 'dice'}, healed ${totalHealed} HP.`);
+    showMsg(`Short rest: spent ${diceToSpend} hit ${diceToSpend === 1 ? 'die' : 'dice'}, healed ${totalHealed} HP.`
+      + (char.class_id === 'mutator' ? ' Biomass restored.' : '')
+      + (char.class_id === 'hexer' && data.disciplineId === 'hellion' ? ' Arcane Release restored.' : '')
+    );
     overlay.remove();
   });
 
@@ -3122,6 +3199,7 @@ function showShortRestModal() {
     showMsg('Short rest complete.'
       + (ndRecovery > 0 ? ` Recovered ${ndRecovery} Nerve Dice.` : '')
       + (char.class_id === 'mutator' ? ' Biomass restored.' : '')
+      + (char.class_id === 'hexer' && data.disciplineId === 'hellion' ? ' Arcane Release restored.' : '')
     );
     overlay.remove();
   });
