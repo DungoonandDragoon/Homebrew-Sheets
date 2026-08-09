@@ -277,7 +277,18 @@ export const ABILITY_LABELS = {
 };
 
 export const CONDITIONS = [
-  'Blinded','Charmed','Deafened','Exhaustion','Frightened',
+  'Blinded','Charmed','Deafened','Frightened',
   'Grappled','Incapacitated','Invisible','Paralyzed','Petrified',
   'Poisoned','Prone','Restrained','Stunned','Unconscious',
 ];
+
+// Standard 5e exhaustion effects by level (cumulative) — shown next to the
+// exhaustion tracker so the current effect is visible at a glance.
+export const EXHAUSTION_EFFECTS = {
+  1: 'Disadvantage on ability checks',
+  2: 'Speed halved',
+  3: 'Disadvantage on attack rolls and saving throws',
+  4: 'Hit point maximum halved',
+  5: 'Speed reduced to 0',
+  6: 'Death',
+};
