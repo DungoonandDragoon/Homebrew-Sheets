@@ -543,6 +543,7 @@ body {
 }
 .slot-pip.used { background: var(--blue-dim); border-color: var(--blue); }
 .slot-pip.available { background: var(--blue); border-color: var(--blue); }
+.slot-pip.exhaustion-active { background: var(--red); border-color: var(--red); }
 .spell-row {
   display: flex;
   align-items: center;
