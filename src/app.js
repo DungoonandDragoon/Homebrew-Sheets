@@ -178,11 +178,18 @@ async function boot() {
     navigate('login');
   }
 
-  onAuthChange(async (newSession) => {
+  onAuthChange(async (newSession, event) => {
     appState.session = newSession;
     if (newSession) {
       appState.userIsDM = await isDM(newSession.user.id);
-      navigate('characters');
+      // Supabase fires this on routine token refreshes too — e.g. every time
+      // the browser tab regains focus after being backgrounded — not just on
+      // an actual sign-in. Only jump to the character list for a genuine
+      // sign-in; otherwise this was wiping out whatever page (like an
+      // in-progress character sheet) the person was already on.
+      if (event === 'SIGNED_IN' && (appState.currentPage === 'loading' || appState.currentPage === 'login')) {
+        navigate('characters');
+      }
     } else {
       appState.userIsDM = false;
       navigate('login');
