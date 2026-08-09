@@ -1,6 +1,6 @@
 import { getCharacter, saveCharacter, getAllHomebrew, supabase } from '../lib/db.js';
 import { deriveStats, maxHP, getMisfireScore, weaponAttack, shortRestNerveDiceRecovery, getClassHitDie,
-         SKILL_LABELS, SKILL_ABILITY_LABELS, ABILITY_LABELS, CONDITIONS, formatMod } from '../lib/calculations.js';
+         SKILL_LABELS, SKILL_ABILITY_LABELS, ABILITY_LABELS, CONDITIONS, EXHAUSTION_EFFECTS, formatMod } from '../lib/calculations.js';
 import { OUTLAW, getProgression, getUnlockedFeatures, getNerveDice } from '../lib/classes/outlaw.js';
 import { MUTATOR, getMutatorProgression, getMutatorUnlockedFeatures, getAvailableMutations, getMutatorSpellSlots, getMaxActiveMutations } from '../lib/classes/mutator.js';
 import { HEXER, getHexerProgression, getHexerUnlockedFeatures, getAvailableCurses, getCursesKnown, getSigils, getHexerSpellSlots, getMaxCursesPerTarget } from '../lib/classes/hexer.js';
@@ -106,10 +106,36 @@ function hideSaveError() {
 }
 
 function mutate(fn) {
+  // renderSheetUI() below rebuilds the sheet's HTML from scratch every time,
+  // which — without this — destroys whatever input the player is typing in
+  // and kicks focus out on every single keystroke. Capture focus + cursor
+  // position first and restore it after the rebuild.
+  const active = document.activeElement;
+  const pageContent = document.getElementById('page-content');
+  let focusInfo = null;
+  if (active && active.id && pageContent && pageContent.contains(active)) {
+    focusInfo = {
+      id: active.id,
+      selectionStart: 'selectionStart' in active ? active.selectionStart : null,
+      selectionEnd: 'selectionEnd' in active ? active.selectionEnd : null,
+    };
+  }
+
   fn();
   derived = deriveStats(buildCharacterForCalc());
   scheduleAutoSave();
-  renderSheetUI();}
+  renderSheetUI();
+
+  if (focusInfo) {
+    const el = document.getElementById(focusInfo.id);
+    if (el) {
+      el.focus();
+      if (focusInfo.selectionStart !== null && typeof el.setSelectionRange === 'function') {
+        try { el.setSelectionRange(focusInfo.selectionStart, focusInfo.selectionEnd); } catch (_) { /* not a text-like input */ }
+      }
+    }
+  }
+}
 
 function buildCharacterForCalc() {
   const inv = data.inventory || [];
@@ -364,6 +390,16 @@ function renderSheetUI() {
           <div class="conditions">
             ${CONDITIONS.map(c => `<div class="condition-tag ${(data.conditions||[]).includes(c)?'active':''}" data-condition="${c}">${c}</div>`).join('')}
           </div>
+          <div style="margin-top:0.85rem;">
+            <div class="card-title" style="margin-bottom:0.35rem;">Exhaustion</div>
+            <div class="slot-pips">
+              ${[1,2,3,4,5,6].map(lvl => `
+                <div class="slot-pip exhaustion-pip ${lvl <= (data.exhaustionLevel || 0) ? 'exhaustion-active' : ''}" data-level="${lvl}" title="Level ${lvl}: ${EXHAUSTION_EFFECTS[lvl]}"></div>
+              `).join('')}
+              <span style="font-size:0.8rem; color:var(--text-dim); margin-left:0.4rem;">${data.exhaustionLevel || 0} / 6</span>
+            </div>
+            ${(data.exhaustionLevel || 0) > 0 ? `<div style="font-size:0.78rem; color:var(--red); margin-top:0.3rem;">${EXHAUSTION_EFFECTS[data.exhaustionLevel]}</div>` : ''}
+          </div>
         </div>
       </div>
     </div>
@@ -482,6 +518,17 @@ function renderSheetUI() {
         const c = tag.dataset.condition;
         if (data.conditions.includes(c)) data.conditions = data.conditions.filter(x => x !== c);
         else data.conditions.push(c);
+      });
+    });
+  });
+
+  // Exhaustion — click a pip to set exhaustion to that level; clicking the
+  // current top level again clears it back to 0.
+  container.querySelectorAll('.exhaustion-pip').forEach(pip => {
+    pip.addEventListener('click', () => {
+      const level = parseInt(pip.dataset.level);
+      mutate(() => {
+        data.exhaustionLevel = (data.exhaustionLevel || 0) === level ? level - 1 : level;
       });
     });
   });
@@ -648,6 +695,8 @@ function renderProficienciesCard() {
 function renderCombatTab(tc) {
   const inv = data.inventory || [];
   const equipped = inv.filter(i => i.equipped && (i.weaponType || i.damage));
+  const chargedItems = inv.filter(i => parseInt(i.maxCharges) > 0);
+  const { resources: limitedUseResources } = collectLimitedUseResources();
 
   tc.innerHTML = `
     <div class="grid-2" style="margin-bottom:1rem;">
@@ -676,11 +725,67 @@ function renderCombatTab(tc) {
       }
     </div>
 
+    ${(limitedUseResources.length > 0 || chargedItems.length > 0) ? `
+      <div class="card" style="margin-bottom:1rem;">
+        <div class="section-header">
+          <div class="card-title" style="margin:0;">Resources</div>
+        </div>
+        ${limitedUseResources.length > 0 ? `
+          <div style="display:flex; flex-direction:column; gap:0.5rem; margin-bottom:${chargedItems.length ? '0.75rem' : '0'};">
+            ${limitedUseResources.map(r => `
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem; flex-wrap:wrap;">
+                <span style="font-size:0.85rem;">${r.name}</span>
+                <div style="display:flex; align-items:center; gap:0.5rem;">
+                  <div class="slot-pips">
+                    ${Array.from({ length: r.max }, (_, i) => `
+                      <div class="slot-pip limited-use-pip ${i < (r.max - r.used) ? 'available' : 'used'}" data-key="${r.key}" data-max="${r.max}" title="${r.name}"></div>
+                    `).join('')}
+                  </div>
+                  <span style="font-size:0.75rem; color:var(--text-muted);">${r.remaining}/${r.max} · ${r.recharge} rest</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+        ${chargedItems.length > 0 ? chargedItems.map(item => {
+          const charges = Math.max(0, Math.min(item.maxCharges, item.charges ?? item.maxCharges));
+          return `
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem; flex-wrap:wrap; padding-top:0.4rem; border-top:1px solid var(--border-dim);">
+              <span style="font-size:0.85rem;">${item.name}</span>
+              <div style="display:flex; align-items:center; gap:0.5rem;">
+                <div class="slot-pips">
+                  ${Array.from({ length: item.maxCharges }, (_, i) => `
+                    <div class="slot-pip charge-pip ${i < charges ? 'available' : 'used'}" data-id="${item.id}" data-max="${item.maxCharges}"></div>
+                  `).join('')}
+                </div>
+                <span style="font-size:0.75rem; color:var(--text-muted);">${charges}/${item.maxCharges} charges</span>
+                <button class="btn btn-sm charge-reset" data-id="${item.id}" title="Reset to full charges">↺</button>
+              </div>
+            </div>`;
+        }).join('') : ''}
+      </div>
+    ` : ''}
+
     ${char.class_id === 'outlaw' && data.archetypeId === 'gunslinger' && char.level >= 3 ? renderTrickShotPanel() : ''}
     ${char.class_id === 'outlaw' && data.archetypeId === 'desperado' && char.level >= 3 ? renderDesperadoPanel() : ''}
     ${char.level >= 13 && char.class_id === 'outlaw' ? renderCalledShotPanel() : ''}
     ${data.archetypeId === 'arcane-artillerist' ? renderCombatSpellsPanel() : ''}
   `;
+
+  // Resources — limited-use pips (feats/species/class features)
+  tc.querySelectorAll('.limited-use-pip').forEach(pip => {
+    pip.addEventListener('click', () => {
+      const key = pip.dataset.key;
+      const max = parseInt(pip.dataset.max);
+      mutate(() => {
+        data.featResourceUses = { ...(data.featResourceUses || {}) };
+        const used = data.featResourceUses[key] || 0;
+        data.featResourceUses[key] = pip.classList.contains('available')
+          ? Math.min(max, used + 1)
+          : Math.max(0, used - 1);
+      });
+    });
+  });
 
   tc.querySelectorAll('.quick-die').forEach(btn => {
     btn.addEventListener('click', () => {
