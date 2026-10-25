@@ -116,7 +116,7 @@ export const OUTLAW = {
       id: 'nerve-dice',
       name: 'Nerve dice',
       level: 2,
-      description: "You gain a pool of Nerve Dice (see the Outlaw table for the number and die size). They represent your composure and instinct under pressure. You regain all expended Nerve Dice when you finish a long rest. You also regain one expended Nerve Die whenever you reduce a hostile creature to 0 hit points with a firearm attack on your turn, so long as the triggering attack did not have a Nerve Die expended as part of it. You may use only one Nerve Die option per turn.",
+      description: "You gain a pool of Nerve Dice (see the Outlaw table for the number and die size). They represent your composure and instinct under pressure. You regain all expended Nerve Dice when you finish a long rest. You also regain one expended Nerve Die whenever you reduce a hostile creature to 0 hit points with a firearm attack on your turn. You may use only one Nerve Die option per turn.",
     },
     'outlaw-archetype': {
       id: 'outlaw-archetype',
