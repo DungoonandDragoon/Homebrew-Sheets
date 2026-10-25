@@ -126,8 +126,9 @@ export function deriveStats(character) {
 
   // Runic barrel / arcane overload save DC (Con-based for arcane artillerist)
   // Uses spell save DC (Int-based) — same as spellSaveDC
-  // Suppressing fire DC (Dex-based) — same as trickShotDC formula
-  const suppressingFireDC = 8 + prof + mods.dexterity;
+  // Covering Fire DC (Dex-based) — same as the trickShotDC formula
+  const coveringFireDC = 8 + prof + mods.dexterity;
+  const suppressingFireDC = coveringFireDC; // old name, kept so nothing referencing it breaks
   // Showstopper DC (Gunslinger level 15) — same as trickShotDC
   const showstopperDC = trickShotDC;
 
@@ -175,7 +176,7 @@ export function deriveStats(character) {
   return {
     prof, mods, initiativeBonus, ac, saves, skills,
     passivePerception, spellSaveDC, spellAttackBonus,
-    trickShotDC, calledShotDC, suppressingFireDC, showstopperDC, nerveDice, recklessFusillade,
+    trickShotDC, calledShotDC, coveringFireDC, suppressingFireDC, showstopperDC, nerveDice, recklessFusillade,
     speed, damageResistances, damageVulnerabilities, conditionImmunities, attunementMax,
     mutationSaveDC, mutatorSpellSaveDC, mutatorSpellAttackBonus,
     curseSaveDC, hexerSpellSaveDC, hexerSpellAttackBonus,
@@ -226,8 +227,10 @@ export function weaponAttack(weapon, character, derived) {
 
 // Steady Hands misfire reduction
 export function getMisfireScore(weapon, character) {
-  if (!weapon.misfireScore) return null;
-  let score = weapon.misfireScore;
+  // Homebrew-editor items store `misfireScore`; starting gear / built-in firearms store `misfire`.
+  const base = parseInt(weapon.misfireScore ?? weapon.misfire) || 0;
+  if (!base) return null;
+  let score = base;
   if (character.classId === 'outlaw' && character.level >= 9) score = Math.max(1, score - 1);
   return score;
 }
@@ -247,8 +250,8 @@ export function maxHP(character) {
 export function shortRestNerveDiceRecovery(character) {
   const { level, classId } = character;
   if (classId !== 'outlaw') return 0;
-  if (level >= 14) return 2; // Nerve Recovery
-  if (level >= 20) return 999; // The Legend: all
+  if (level >= 20) return 999; // The Legend: all Nerve Dice on a short or long rest
+  if (level >= 14) return 2;   // Nerve Recovery
   return 0;
 }
 

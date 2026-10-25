@@ -7,7 +7,7 @@
 
 - **Supabase** — free cloud database that stores all character data
 - **GitHub Pages** — free website hosting for the character sheet app
-- **Browser extension** — connects the sheet to DnDBeyond
+- **Browser extension** — optional helper that posts rolls to Discord
 
 Total setup time: about 30–45 minutes, most of which is waiting for things to load.
 
@@ -86,34 +86,38 @@ Total setup time: about 30–45 minutes, most of which is waiting for things to 
 
 ---
 
-## STEP 6 — Set up the browser extension
+## STEP 6 — Discord rolls (and the optional extension)
 
-Before distributing to players you need to fill in your site URL:
+Rolls can be posted to Discord. **No installation is needed** — each character has its own webhook:
 
-1. Open `extension/manifest.json` and replace `YOUR_GITHUB_PAGES_URL` with your actual URL
-   (e.g. `https://yourname.github.io`)
-2. Open `extension/popup.js` and replace `YOUR_GITHUB_PAGES_URL` with the same URL
-3. Zip the entire `extension/` folder into a file called `homebrew-sheet-extension.zip`
+1. In Discord: **Server Settings → Integrations → Webhooks → New Webhook**, pick a channel, **Copy Webhook URL**
+2. Open the character on the sheet and click **Discord** in the header
+3. Paste the URL, click **Send test message**, then **Save**
 
-**To install in Chrome/Edge (for you and each player):**
-1. Open Chrome and go to `chrome://extensions`
+The webhook is stored on that character, so one player can run different characters in different servers.
+Rolls made on a sheet only ever go to *that* character's webhook.
+
+**The browser extension is optional.** If it is installed, the sheet hands rolls to it instead of posting from the page
+(useful if a browser or ad-blocker interferes with Discord requests). The extension has nothing to configure.
+
+To update the download players get from the site's **Discord Extension** button, zip the `extension/` folder (so the zip contains a
+single `extension/` folder) and save it as `extension.zip` in the repo root.
+
+**To install in Chrome/Edge:**
+1. Unzip, then go to `chrome://extensions`
 2. Toggle **Developer mode** ON (top right)
-3. Click **Load unpacked**
-4. Select the `extension/` folder (not the zip — the actual folder)
-
-**To share with players:**
-- Send them the `extension/` folder (zipped)
-- Tell them to unzip it and follow the Load unpacked steps above
+3. Click **Load unpacked** and select the unzipped `extension/` folder
+4. (Updating?) Replace the folder's files and click the reload ⟳ icon on the extension, then refresh the sheet tab
 
 ---
 
 ## STEP 7 — Test the full flow
 
-1. Open DnDBeyond and your sheet in separate tabs
-2. On your sheet, roll anything (click a skill, save, or attack)
-3. A result should appear as a toast on your sheet AND be sent to DnDBeyond
+1. Open a character, click **Discord**, paste a webhook and **Send test message**
+2. Roll anything (a skill, a save, an attack)
+3. The roll appears as a toast on the sheet AND in your Discord channel
 
-If DnDBeyond doesn't receive the roll, it will still show in the sheet's own roll toast. The game log injection depends on which page of DnDBeyond you have open — the campaign page with active chat works best.
+If a roll can't be delivered, a red notice appears on the sheet explaining why (e.g. the webhook was deleted).
 
 ---
 
@@ -123,9 +127,8 @@ Send each player these instructions:
 
 1. Go to **YOUR_SITE_URL** and sign in with Google
 2. Click **New Character** and follow the creation wizard
-3. Install the browser extension (see zip file)
-4. Open your character sheet in one tab and DnDBeyond in another
-5. Roll from your character sheet — it sends to DnDBeyond automatically
+3. Open your character and click **Discord** to paste your server's webhook (optional)
+4. Roll from your character sheet — it appears in Discord automatically
 
 ---
 
@@ -150,7 +153,7 @@ Log in as DM → click **Homebrew Editor** → add feats, species, backgrounds, 
 
 **"Error loading characters"** — Check that your Supabase URL and anon key are correct in `config.js` and that the schema SQL ran without errors.
 
-**Rolls not appearing in DnDBeyond** — Make sure the extension is installed and enabled, that DnDBeyond is open in a tab, and that you're on a campaign page with active chat. The roll will always appear in the sheet's own toast regardless.
+**Rolls not appearing in Discord** — Click **Discord** on the character and use **Send test message**. If that fails, the webhook may have been deleted in Discord (create a new one) or the URL was copied incorrectly. Rolls always appear in the sheet's own toast regardless.
 
 **Google sign-in fails** — Make sure Google OAuth is enabled in Supabase and that the redirect URL (`https://YOURNAME.github.io/dnd-homebrew-sheet`) is added to the allowed redirect URLs in your Google Cloud Console OAuth credentials.
 

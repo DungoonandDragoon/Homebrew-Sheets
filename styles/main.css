@@ -618,6 +618,26 @@ body {
 }
 .toast-breakdown { font-size: 0.82rem; color: var(--text-dim); margin-top: 0.25rem; }
 
+/* ─── Discord delivery problem toast ─────────────────────────────────────────── */
+#discord-problem {
+  position: fixed;
+  top: 4.5rem;
+  right: 1.5rem;
+  max-width: 360px;
+  background: rgba(192, 57, 43, 0.15);
+  border: 1px solid var(--red-dim);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  z-index: 999;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+}
+#discord-problem.visible { opacity: 1; transform: translateY(0); }
+
 /* ─── Tab bar ────────────────────────────────────────────────────────────────── */
 .tab-bar {
   display: flex;

@@ -1,3 +1,13 @@
+// Suggested firearms from the Outlaw document. Used by the character creator,
+// the Add Item list on the sheet, and the rules migration below.
+export const OUTLAW_FIREARMS = [
+  { id: 'pistol',      name: 'Pistol',       damage: '1d10', damageType: 'Piercing', weaponType: 'firearm', weaponCategory: 'martial', range: '30/90',  reload: 4, misfire: 1, detail: 'Light' },
+  { id: 'hand-cannon', name: 'Hand cannon',  damage: '1d12', damageType: 'Piercing', weaponType: 'firearm', weaponCategory: 'martial', range: '20/60',  reload: 1, misfire: 2, detail: 'Two-handed' },
+  { id: 'rifle',       name: 'Rifle',        damage: '1d12', damageType: 'Piercing', weaponType: 'firearm', weaponCategory: 'martial', range: '80/320', reload: 1, misfire: 1, detail: 'Two-handed' },
+  { id: 'pepperbox',   name: 'Pepperbox',    damage: '1d10', damageType: 'Piercing', weaponType: 'firearm', weaponCategory: 'martial', range: '30/90',  reload: 6, misfire: 2, detail: 'Light' },
+  { id: 'scatter-gun', name: 'Scatter gun',  damage: '2d6',  damageType: 'Piercing', weaponType: 'firearm', weaponCategory: 'martial', range: '15/30',  reload: 2, misfire: 2, detail: 'Two-handed. Each creature in a 15-foot cone makes a DC 13 Dexterity saving throw, taking full damage on a failure or half on a success.' },
+];
+
 export const OUTLAW = {
   id: 'outlaw',
   name: 'Outlaw',
@@ -12,29 +22,28 @@ export const OUTLAW = {
     options: ['Acrobatics','Athletics','Deception','History','Insight','Investigation','Perception','Persuasion','Sleight of Hand','Stealth','Survival'],
   },
   spellcasting: false,
+  // Revised starting equipment (per the Outlaw document):
+  //   (a) a pistol and 20 bullets or (b) any martial weapon and a hand crossbow with 20 bolts
+  //   (a) leather armor or (b) a chain shirt
+  //   (a) a dungeoneer's pack or (b) an explorer's pack
+  //   Tinker's tools and 10 gp
+  startingGold: 10,
   startingEquipment: {
     choices: [
       {
-        id: 'firearm1',
-        label: 'First firearm',
-        pickFromCategory: 'firearm', // player picks from BUILTIN_ITEMS where weaponType === 'firearm'
-      },
-      {
-        id: 'weapon2',
-        label: 'Second weapon',
+        id: 'weapons',
+        label: 'Weapons',
         options: [
-          { id: 'a', label: 'A) A second firearm', pickFromCategory: 'firearm' },
-          { id: 'b', label: 'B) A shortsword', items: [
-            { id: 'shortsword', name: 'Shortsword', quantity: 1, damage: '1d6', damageType: 'Piercing', weaponType: 'melee' },
+          { id: 'a', label: 'A) A pistol and 20 bullets', items: [
+            { id: 'pistol', name: 'Pistol', quantity: 1, damage: '1d10', damageType: 'Piercing', weaponType: 'firearm', range: '30/90', reload: 4, misfire: 1, detail: 'Light' },
+            { id: 'bullets', name: 'Bullets', quantity: 20, detail: 'Ammunition' },
           ]},
-        ],
-      },
-      {
-        id: 'bullets',
-        label: 'Ammunition',
-        options: [
-          { id: 'a', label: 'A) 40 bullets (two firearms)', items: [{ id: 'bullets', name: 'Bullets', quantity: 40, detail: 'Ammunition' }] },
-          { id: 'b', label: 'B) 20 bullets (one firearm)', items: [{ id: 'bullets', name: 'Bullets', quantity: 20, detail: 'Ammunition' }] },
+          // pickFromCategory + items: the player picks the martial weapon, and the
+          // listed items (hand crossbow + bolts) are added alongside it.
+          { id: 'b', label: 'B) Any martial weapon and a hand crossbow with 20 bolts', pickFromCategory: 'martial', items: [
+            { id: 'hcrossbow', name: 'Hand crossbow', quantity: 1, damage: '1d6', damageType: 'Piercing', weaponType: 'ranged', range: '30/120' },
+            { id: 'bolts', name: 'Crossbow bolts', quantity: 20, detail: 'Ammunition' },
+          ]},
         ],
       },
       {
@@ -42,7 +51,7 @@ export const OUTLAW = {
         label: 'Armour',
         options: [
           { id: 'a', label: 'A) Leather armor', items: [{ id: 'leather', name: 'Leather armor', quantity: 1, baseAC: 11, armorType: 'light' }] },
-          { id: 'b', label: 'B) Scale mail',    items: [{ id: 'scalemailarmor', name: 'Scale mail', quantity: 1, baseAC: 14, armorType: 'medium' }] },
+          { id: 'b', label: 'B) A chain shirt', items: [{ id: 'chainshirt', name: 'Chain shirt', quantity: 1, baseAC: 13, armorType: 'medium' }] },
         ],
       },
       {
@@ -89,7 +98,7 @@ export const OUTLAW = {
       id: 'iron-nerve',
       name: 'Iron nerve',
       level: 1,
-      description: 'You are immune to the frightened condition. Additionally, being within 5 feet of a hostile creature does not impose disadvantage on your ranged attack rolls with firearms.',
+      description: 'You have faced enough danger that fear no longer controls you. You are immune to the frightened condition. Additionally, being within 5 feet of a hostile creature does not impose disadvantage on your ranged attack rolls with firearms.',
       mechanical: [
         { type: 'condition-immunity', condition: 'frightened' },
       ],
@@ -98,7 +107,7 @@ export const OUTLAW = {
       id: 'gunfighters-instinct',
       name: "Gunfighter's instinct",
       level: 1,
-      description: "When you suffer a misfire, you may use your bonus action to clear and reload the weapon. You may draw or stow a firearm as a free object interaction. You may add your Intelligence modifier (minimum +1) to initiative rolls. When you are surprised, you may still act during the surprise round (one firearm attack or Hide action only).",
+      description: "When you suffer a misfire, you may use your bonus action to clear and reload the weapon rather than using your action. You may draw or stow a firearm as a free object interaction on your turn. You may add your Intelligence modifier (minimum +1) to initiative rolls. When you are surprised at the start of combat, you may still act during the surprise round, but you may only make a single firearm attack or take the Hide action during this round.",
       mechanical: [
         { type: 'initiative-bonus', ability: 'intelligence', minimum: 1 },
       ],
@@ -107,7 +116,13 @@ export const OUTLAW = {
       id: 'nerve-dice',
       name: 'Nerve dice',
       level: 2,
-      description: "You gain a pool of Nerve Dice. You regain all expended Nerve Dice on a long rest. You also regain one expended Nerve Die whenever you reduce a hostile creature to 0 hit points with a firearm attack on your turn. You may use only one Nerve Die option per turn, except for Graze which may be used freely as your reaction.",
+      description: "You gain a pool of Nerve Dice (see the Outlaw table for the number and die size). They represent your composure and instinct under pressure. You regain all expended Nerve Dice when you finish a long rest. You also regain one expended Nerve Die whenever you reduce a hostile creature to 0 hit points with a firearm attack on your turn, so long as the triggering attack did not have a Nerve Die expended as part of it. You may use only one Nerve Die option per turn.",
+    },
+    'outlaw-archetype': {
+      id: 'outlaw-archetype',
+      name: 'Modus operandi',
+      level: 3,
+      description: 'You choose a modus operandi: the Arcane Artillerist, the Gunslinger, or the Desperado. Your archetype grants features at 3rd, 7th, 10th, 15th, and 18th level.',
     },
     'extra-attack': {
       id: 'extra-attack',
@@ -119,13 +134,13 @@ export const OUTLAW = {
       id: 'calculated-eye',
       name: 'Calculated eye',
       level: 6,
-      description: 'Once per turn when you hit a creature with a firearm attack, you may use your Intelligence modifier instead of your Dexterity modifier for that attack\'s damage roll.',
+      description: "You have learned to see openings before they appear. Once per turn when you hit a creature with a firearm attack, you may use your Intelligence modifier instead of your Dexterity modifier for that attack's damage roll.",
     },
     'steady-hands': {
       id: 'steady-hands',
       name: 'Steady hands',
       level: 9,
-      description: 'You may reload a firearm as a free object interaction once per turn. Additionally, reduce the misfire score of any firearm you wield by 1 (minimum 1).',
+      description: 'Reloading has become second nature. You may reload a firearm as a free object interaction once per turn. Additionally, reduce the misfire score of any firearm you wield by 1 (minimum 1).',
       mechanical: [
         { type: 'misfire-reduction', amount: 1 },
       ],
@@ -134,20 +149,19 @@ export const OUTLAW = {
       id: 'hardened-instincts',
       name: 'Hardened instincts',
       level: 11,
-      description: 'Your Nerve Die size increases to a d8. Additionally, once per turn when you score a critical hit with a firearm, you regain one expended Nerve Die.',
+      description: 'Years of close calls have sharpened your instincts. Your Nerve Die size increases to a d8, as shown on the Outlaw table. Additionally, once per turn when you score a critical hit with a firearm, you regain one expended Nerve Die.',
     },
     'called-shot': {
       id: 'called-shot',
       name: 'Called shot',
       level: 13,
-      description: 'When you hit a creature with a firearm attack you may expend 2 Nerve Dice to force the target to make a Constitution saving throw (DC = 8 + proficiency bonus + Dexterity modifier). On a failure, choose one: Hamstring (speed halved until end of next turn), Shell-Shocked (disadvantage on attacks, no reactions until end of next turn), or Disarm (drops one held object).',
-      usesPerTurn: 1,
+      description: 'When you hit a creature with a firearm attack, you may expend 2 Nerve Dice to force the target to make a Constitution saving throw (DC = 8 + your proficiency bonus + your Dexterity modifier). On a failure, one of the following effects applies (your choice): Hamstring (the target\'s speed is halved until the end of its next turn), Shell-Shocked (the target has disadvantage on attack rolls and cannot take reactions until the end of its next turn), or Disarm (the target drops one held object of your choice at its feet).',
     },
     'nerve-recovery': {
       id: 'nerve-recovery',
       name: 'Nerve recovery',
       level: 14,
-      description: 'You regain 2 expended Nerve Dice when you finish a short rest.',
+      description: 'You have learned to recover your composure with only a moment to breathe. You regain 2 expended Nerve Dice when you finish a short rest.',
       mechanical: [
         { type: 'short-rest-nerve-dice', amount: 2 },
       ],
@@ -156,49 +170,57 @@ export const OUTLAW = {
       id: 'hair-trigger',
       name: 'Hair trigger',
       level: 17,
-      description: 'When initiative is rolled and you are not surprised, you may immediately make one firearm attack before the first round begins. This attack resolves before any creature takes a turn.',
+      description: 'You have learned to recognize danger before it begins. When initiative is rolled and you are not surprised, you may immediately make one firearm attack before the first round begins. This attack resolves before any creature takes a turn.',
     },
     'the-legend': {
       id: 'the-legend',
       name: 'The legend',
       level: 20,
-      description: "Your Nerve Dice pool increases by 3 (shown in table). You regain all expended Nerve Dice on a short or long rest. At the start of each combat, you act first regardless of initiative. When you reduce a creature to 0 HP with a firearm, hostile creatures that can see you must make a Wisdom saving throw (DC = 8 + proficiency + Dex mod) or become frightened until the end of your next turn. Once per turn when you expend one or more Nerve Dice, you may make one firearm attack as part of the same action, bonus action, or reaction.",
+      description: "Your reputation has become as dangerous as your aim. Your Nerve Dice pool increases by 3, which is shown in the Nerve Dice column of the class table. You regain all expended Nerve Dice on a short or long rest. Additionally: (1) At the start of each combat, you act first regardless of initiative order. If another creature has a feature that would also cause it to act first, you and that creature roll initiative normally against each other to determine who goes between you, but you both go before everyone else. (2) When you reduce a creature to 0 hit points with a firearm attack, each hostile creature that can see you must make a Wisdom saving throw (DC = 8 + your proficiency bonus + your Dexterity modifier) or become frightened of you until the end of your next turn. A creature that succeeds is immune to this effect for 24 hours. (3) Once per turn when you expend one or more Nerve Dice for any reason, you may make one firearm attack as part of the same action, bonus action, or reaction that triggered the expenditure.",
     },
   },
 
-  // Nerve dice spend options (available at level 2+)
+  // Nerve Dice spend options (available at level 2+).
+  //   roll: 'die'  -> the spent die (or dice) is rolled and the result is used (shown/sent to Discord)
+  //   roll: null   -> the dice are only spent; nothing is rolled
+  //   {DC} in a description is replaced with the character's live DC on the sheet.
   nerveDiceOptions: [
     {
-      id: 'quick-shot',
-      name: 'Quick shot',
+      id: 'steady-shot',
+      name: 'Steady shot',
       cost: 1,
-      action: 'bonus action',
-      description: 'Make one firearm attack.',
+      action: 'before an attack roll',
+      description: 'Add your Nerve Die to the attack roll.',
+      roll: 'die',
+      rollUse: 'to the attack roll',
       levelRequired: 2,
     },
     {
-      id: 'graze',
-      name: 'Graze',
+      id: 'duck-and-weave',
+      name: 'Duck and weave',
       cost: 1,
       action: 'reaction',
-      description: 'Reduce damage taken by the result of the die roll plus your Intelligence modifier.',
-      roll: { dice: 1, die: 'nerveDie', addAbility: 'intelligence' },
+      description: 'When a creature you can see makes an attack against you, roll your Nerve Die and add the result to your AC against that attack, potentially causing it to miss.',
+      roll: 'die',
+      rollUse: 'to your AC against that attack',
       levelRequired: 2,
     },
     {
-      id: 'suppressing-fire',
-      name: 'Suppressing fire',
+      id: 'covering-fire',
+      name: 'Covering fire',
       cost: 2,
       action: 'action',
-      description: 'Choose a 10-foot radius area within normal firearm range. Until start of next turn, creatures entering or leaving must succeed on a Dexterity saving throw (DC = 8 + proficiency + Dex mod) or have speed reduced to 0.',
+      description: "Choose a 10-foot radius area within your firearm's normal range. Until the start of your next turn, any creature that enters or attempts to leave the area must succeed on a Dexterity saving throw (DC {DC}) or have its speed reduced to 0 for the rest of its turn.",
+      roll: null,
       levelRequired: 2,
     },
     {
-      id: 'in-plain-sight',
-      name: 'In plain sight',
+      id: 'quick-draw',
+      name: 'Quick draw',
       cost: 1,
       action: 'bonus action',
-      description: 'Take the Hide action.',
+      description: "When a creature enters your firearm's normal range, expend 1 Nerve Die as a reaction to make one firearm attack against it.",
+      roll: null,
       levelRequired: 2,
     },
   ],
@@ -246,7 +268,7 @@ export const OUTLAW = {
           id: 'runic-barrel',
           name: 'Runic barrel',
           level: 7,
-          description: 'Over a short or long rest, inscribe one rune into a firearm. One rune at a time. Flare Rune: +1d6 fire, bypasses fire resistance. Force Rune: bypasses physical resistance, pushes 5ft on hit. Storm Rune: +1d6 lightning, Con save or lose reaction until start of next turn. Void Rune: deals necrotic instead of piercing; crit prevents HP regain until start of your next turn.',
+          description: 'Over the course of a short or long rest, you may inscribe one of the following runes into a firearm you are holding. A firearm holds only one rune at a time. Flare Rune: attacks with this weapon deal an additional 1d6 fire damage and bypass fire resistance. Force Rune: attacks bypass resistance to physical damage and push the target 5 feet on a hit. Storm Rune: attacks deal an additional 1d6 lightning damage; on a hit, the target must succeed on a Constitution saving throw (DC equals your spell save DC) or lose its reaction until the start of its next turn. Void Rune: attacks deal necrotic damage instead of piercing; on a critical hit, the target cannot regain hit points until the start of your next turn.',
           hasActiveState: true,
           runeOptions: ['None','Flare','Force','Storm','Void'],
         },
@@ -260,7 +282,7 @@ export const OUTLAW = {
           id: 'arcane-overload',
           name: 'Arcane overload',
           level: 15,
-          description: 'When Enchanted Round hits, expend 1 Nerve Die to trigger an effect based on your current rune. Flare: Con save or blinded until end of next turn. Force: Str save or knocked prone and pushed 10ft. Storm: Con save or lose concentration and cannot cast concentration spells until end of next turn. Void: Con save or gain one exhaustion level.',
+          description: 'When you use Enchanted Round and the attack hits, you may expend one additional Nerve Die to trigger an Arcane Overload effect based on the rune currently inscribed on your firearm (no effect if no rune is inscribed). Flare Rune: the target makes a Constitution saving throw against your spell save DC or is blinded until the end of your next turn. Force Rune: Strength saving throw or knocked prone and pushed 10 feet away from you. Storm Rune: Constitution saving throw or loses concentration and cannot cast concentration spells until the end of your next turn. Void Rune: Constitution saving throw or gains one level of exhaustion.',
         },
         'spellshot': {
           id: 'spellshot',
@@ -284,12 +306,12 @@ export const OUTLAW = {
           { id:'disarming-shot',   name:'Disarming shot',   cost:1, description:'On a hit, the target makes a Strength saving throw or drops one held object at its feet.' },
           { id:'pinning-shot',     name:'Pinning shot',     cost:1, description:"On a hit, target makes a Strength saving throw or speed becomes 0 until end of its next turn." },
           { id:'double-tap',       name:'Double tap',       cost:1, description:'On a hit, roll damage dice twice and take the higher result.' },
-          { id:'penetrating-shot', name:'Penetrating shot', cost:1, description:"This attack ignores the target's armor bonus to AC. Shields and natural armor still apply." },
+          { id:'penetrating-shot', name:'Penetrating shot', cost:2, description:"This attack ignores the target's armor bonus to AC. Shields and natural armor still apply." },
           { id:'warning-shot',     name:'Warning shot',     cost:1, description:'No hit required. Target makes Wisdom saving throw or becomes frightened until end of its next turn.' },
-          { id:'snapshot',         name:'Snapshot',         cost:1, description:'Reaction. When a creature within normal range attacks an ally you can see, make one firearm attack. Your attack resolves first; if it deals damage their attack roll has disadvantage.' },
-          { id:'glass-jaw',        name:'Glass jaw',        cost:2, description:'On a hit, attack deals maximum damage for weapon dice (no roll). Bonus damage still rolled.' },
-          { id:'fan-the-hammer',   name:'Fan the hammer',   cost:2, description:'Make one additional firearm attack as part of the same Attack action. Both attacks this turn have disadvantage. Requires firearm with reload 4+.' },
-          { id:'shatter-shot',     name:'Shatter shot',     cost:2, description:'On a hit, target and each creature within 5 feet must make a Constitution saving throw or be stunned until end of your next turn. Triggering target has disadvantage on this save.' },
+          { id:'snapshot',         name:'Snapshot',         cost:2, description:"Reaction. When a creature within your firearm's normal range attacks an ally you can see, you may make one firearm attack against that creature as a reaction. Your attack resolves before theirs; if it deals damage, their attack roll has disadvantage." },
+          { id:'glass-jaw',        name:'Glass jaw',        cost:3, description:'On a hit, attack deals maximum damage for weapon dice (no roll). Bonus damage still rolled.' },
+          { id:'fan-the-hammer',   name:'Fan the hammer',   cost:2, description:'Make one additional firearm attack as part of the same Attack action. Both attacks this turn have disadvantage. Requires a firearm with a reload score of 4 or higher.' },
+          { id:'shatter-shot',     name:'Shatter shot',     cost:3, description:'On a hit, target and each creature within 5 feet must make a Constitution saving throw or be stunned until end of your next turn. Triggering target has disadvantage on this save.' },
         ],
       },
       features: {
@@ -303,20 +325,20 @@ export const OUTLAW = {
           id: 'signature-move',
           name: 'Signature move',
           level: 7,
-          description: 'Choose one known Trick Shot as your Signature Move. Once per turn, that trick shot costs 1 fewer Nerve Die (minimum 1 die). Change your Signature Move on a long rest.',
+          description: 'Choose one Trick Shot you know as your Signature Move. You may use it once per turn without expending a Nerve Die. If the Trick Shot requires two Nerve Dice to be expended, you only have to expend one. You may change your Signature Move on a long rest.',
           hasChoice: true,
         },
         'read-the-tell': {
           id: 'read-the-tell',
           name: 'Read the tell',
           level: 10,
-          description: 'Once per turn when you hit a creature with a firearm attack, you may forgo the damage roll to learn one of: current HP, AC, damage vulnerabilities/immunities, or whether it is concentrating on a spell. Once per creature per short or long rest.',
+          description: 'Once per turn when you hit a creature with a firearm attack, you may forgo the damage roll to learn one of: current HP, AC, damage vulnerabilities/immunities, or whether it is concentrating on a spell. Once you have read a creature this way you cannot do so again until it finishes a short or long rest.',
         },
         'showstopper': {
           id: 'showstopper',
           name: 'Showstopper',
           level: 15,
-          description: 'When you reduce a creature to 0 HP using a Trick Shot, each hostile creature within 30 feet that witnessed it must make a Wisdom saving throw (DC = Trick Shot DC) or become frightened until the end of your next turn. Immune for 24 hours on a success.',
+          description: 'A kill is no longer just a kill. It is a message. When you reduce a creature to 0 hit points using a Trick Shot, each hostile creature within 30 feet that witnessed it must make a Wisdom saving throw (DC = Trick Shot DC) or become frightened of you until the end of your next turn. Creatures that succeed are immune to this effect for 24 hours.',
         },
         'legendary-duel': {
           id: 'legendary-duel',
@@ -340,6 +362,7 @@ export const OUTLAW = {
           cost: 1,
           action: 'reaction',
           description: 'When a creature within 5 feet misses you with a melee attack, make one firearm attack against it.',
+          roll: null,
           levelRequired: 7,
         },
         {
@@ -348,6 +371,7 @@ export const OUTLAW = {
           cost: 2,
           action: 'reaction',
           description: 'When you fail a save against being stunned, paralyzed, or incapacitated, spend 2 Nerve Dice to succeed instead. Once per round.',
+          roll: null,
           levelRequired: 10,
         },
         {
@@ -356,6 +380,7 @@ export const OUTLAW = {
           cost: 1,
           action: 'free (on kill)',
           description: 'When you reduce a creature to 0 HP with a firearm attack, make one additional firearm attack against a different creature within range as part of the same action.',
+          roll: null,
           levelRequired: 15,
         },
       ],
@@ -405,7 +430,7 @@ export const OUTLAW = {
           id: 'the-last-bullet',
           name: 'The last bullet',
           level: 18,
-          description: 'While you have fewer HP than half your maximum, your firearm attacks deal an additional 1d8 damage and your Nerve Dice are treated as one size larger than shown on the table.',
+          description: 'The closer you get to defeat, the harder you are to stop. While you have fewer hit points than half your maximum, your firearm attacks deal an additional 1d8 damage of the same type as the firearm and your Nerve Dice are treated as one size larger than shown on the table.',
         },
       },
     },
@@ -438,6 +463,38 @@ export function getTrickShotCount(level) {
   if (level < 3) return 0;
   const { startCount, additionalLevels } = OUTLAW.archetypes.gunslinger.trickShots;
   return startCount + additionalLevels.filter(l => l <= level).length;
+}
+
+// Helper: Nerve Die cost of a Trick Shot when it is the Gunslinger's Signature Move.
+// "Once per turn without expending a Nerve Die; if it requires two, only expend one"
+// = the shot costs one die less than normal (never below 0).
+export function signatureCost(baseCost) {
+  return Math.max(0, baseCost - 1);
+}
+
+// Version of the Outlaw rules baked into saved characters. Bump this when a
+// change needs to touch data already stored on existing characters.
+export const OUTLAW_RULES_VERSION = 2;
+
+// One-time, idempotent upgrade of an already-saved Outlaw character to the
+// current rules. Class features, Nerve Dice options, trick shot costs and the
+// Signature Move are all read live from this file, so existing characters pick
+// those up automatically. What is stored on the character and needs updating:
+// firearms in the inventory (Reload score, and Misfire/properties if missing).
+// Returns true if anything changed (so the caller knows to save).
+export function migrateOutlawCharacter(data, classId) {
+  if (classId !== 'outlaw' || !data) return false;
+  if ((data.outlawRulesVersion || 0) >= OUTLAW_RULES_VERSION) return false;
+  (data.inventory || []).forEach(item => {
+    if (item.weaponType !== 'firearm') return;
+    const ref = OUTLAW_FIREARMS.find(f => f.name.toLowerCase() === String(item.name || '').trim().toLowerCase());
+    if (!ref) return; // custom or legacy firearm (Musket, Blunderbuss…) — leave exactly as the player has it
+    if (item.reload == null) item.reload = ref.reload;
+    if (item.misfire == null && item.misfireScore == null) item.misfire = ref.misfire;
+    if (!item.detail) item.detail = ref.detail;
+  });
+  data.outlawRulesVersion = OUTLAW_RULES_VERSION;
+  return true;
 }
 
 // Helper: get nerve dice info for a level

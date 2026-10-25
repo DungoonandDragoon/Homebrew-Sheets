@@ -7,7 +7,7 @@ export function renderLogin(container, { onSignIn }) {
       </div>
       <div class="login-divider"></div>
       <div class="login-subtitle">
-        Sign in with your Google account to access your character sheets and roll directly into DnDBeyond.
+        Sign in with your Google account to access your character sheets and post your rolls to Discord.
       </div>
       <button class="btn btn-gold btn-lg" id="google-signin">
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none">

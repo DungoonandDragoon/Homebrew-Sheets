@@ -1,11 +1,12 @@
 import { getCharacter, saveCharacter, getAllHomebrew, supabase } from '../lib/db.js';
 import { deriveStats, maxHP, getMisfireScore, weaponAttack, shortRestNerveDiceRecovery, getClassHitDie,
          SKILL_LABELS, SKILL_ABILITY_LABELS, ABILITY_LABELS, CONDITIONS, EXHAUSTION_EFFECTS, formatMod } from '../lib/calculations.js';
-import { OUTLAW, getProgression, getUnlockedFeatures, getNerveDice } from '../lib/classes/outlaw.js';
+import { OUTLAW, OUTLAW_FIREARMS, getProgression, getUnlockedFeatures, getNerveDice, signatureCost, migrateOutlawCharacter } from '../lib/classes/outlaw.js';
 import { MUTATOR, getMutatorProgression, getMutatorUnlockedFeatures, getAvailableMutations, getMutatorSpellSlots, getMaxActiveMutations } from '../lib/classes/mutator.js';
 import { HEXER, getHexerProgression, getHexerUnlockedFeatures, getAvailableCurses, getCursesKnown, getSigils, getHexerSpellSlots, getMaxCursesPerTarget } from '../lib/classes/hexer.js';
 import { WIZARD_SPELLS, HEXER_SPELL_SOURCE } from '../lib/spells.js';
-import { sendRollToDnDBeyond, rollDie, rollDice } from '../app.js';
+import { sendRoll, sendNotice, setRollWebhook, rollDie, rollDice } from '../app.js';
+import { isValidWebhookUrl, buildNoticeBody, postToDiscord, detectExtension } from '../lib/discord.js';
 
 let char = null;       // raw DB record
 let data = null;       // char.data shorthand
@@ -185,6 +186,7 @@ function getEffectiveSkillProficiencies() {
 export async function renderSheet(container, characterId, uid, dm, navigate) {
   userId = uid;
   isDM = dm;
+  setRollWebhook(null); // no Discord posting until THIS character has loaded
 
   container.innerHTML = `<div style="color:var(--text-muted); text-align:center; padding:3rem;">Loading character…</div>`;
   try {
@@ -196,6 +198,17 @@ export async function renderSheet(container, characterId, uid, dm, navigate) {
     container.innerHTML = `<div class="card"><p style="color:var(--red)">Error loading character: ${e.message}</p></div>`;
     return;
   }
+
+  // Bring an already-saved Outlaw up to the current rules (stored firearm stats).
+  // Class features / Nerve Dice options / trick shots are read live from the class
+  // file, so only data that is stored on the character needs this. Idempotent.
+  if (migrateOutlawCharacter(data, char.class_id)) {
+    savePending = true;
+    scheduleAutoSave();
+  }
+
+  // This character's own Discord webhook (empty = rolls stay on screen only)
+  setRollWebhook(data.discordWebhook);
 
   // Set nerve dice max on data for DM view
   if (char.level >= 2) {
@@ -271,6 +284,7 @@ export async function renderSheet(container, characterId, uid, dm, navigate) {
             char.level    = remote.level;
             char.class_id = remote.class_id;
             Object.assign(data, remote.data);
+            setRollWebhook(data.discordWebhook);
             derived = deriveStats(buildCharacterForCalc());
             renderSheetUI();
           } catch (e) {
@@ -344,6 +358,7 @@ function renderSheetUI() {
       </div>
       <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-start;">
         ${!isDM ? `<button class="btn btn-sm" id="level-up-btn">Level up</button>` : ''}
+        <button class="btn btn-sm" id="discord-btn" title="${data.discordWebhook ? 'Rolls for this character post to Discord' : 'Post this character\'s rolls to a Discord channel'}">Discord${isValidWebhookUrl(data.discordWebhook) ? ' <span style="color:var(--green);">●</span>' : ''}</button>
         <button class="btn btn-sm btn-gold" id="save-btn">Save</button>
       </div>
     </div>
@@ -420,6 +435,7 @@ function renderSheetUI() {
   });
 
   document.getElementById('level-up-btn')?.addEventListener('click', () => showLevelUpModal());
+  document.getElementById('discord-btn')?.addEventListener('click', () => showDiscordModal());
 
   document.getElementById('hp-dmg')?.addEventListener('click', () => {
     const amt = parseInt(prompt('Damage amount?') || '0');
@@ -625,7 +641,7 @@ function renderCoreTab(tc) {
       const ab = box.dataset.ab;
       const roll = rollDie(20);
       const total = roll + derived.mods[ab];
-      sendRollToDnDBeyond(`${ABILITY_LABELS[ab]} check`, total, `d20 (${roll}) ${formatMod(derived.mods[ab])}`, char.name);
+      sendRoll(`${ABILITY_LABELS[ab]} check`, total, `d20 (${roll}) ${formatMod(derived.mods[ab])}`, char.name);
     });
   });
 
@@ -635,7 +651,7 @@ function renderCoreTab(tc) {
       const ab = row.dataset.ab;
       const roll = rollDie(20);
       const total = roll + derived.saves[ab];
-      sendRollToDnDBeyond(`${ABILITY_LABELS[ab]} save`, total, `d20 (${roll}) ${formatMod(derived.saves[ab])}`, char.name);
+      sendRoll(`${ABILITY_LABELS[ab]} save`, total, `d20 (${roll}) ${formatMod(derived.saves[ab])}`, char.name);
     });
   });
 
@@ -645,7 +661,7 @@ function renderCoreTab(tc) {
       const key = row.dataset.skill;
       const roll = rollDie(20);
       const total = roll + derived.skills[key];
-      sendRollToDnDBeyond(`${SKILL_LABELS[key]}`, total, `d20 (${roll}) ${formatMod(derived.skills[key])}`, char.name);
+      sendRoll(`${SKILL_LABELS[key]}`, total, `d20 (${roll}) ${formatMod(derived.skills[key])}`, char.name);
     });
   });
 }
@@ -791,14 +807,14 @@ function renderCombatTab(tc) {
     btn.addEventListener('click', () => {
       const d = parseInt(btn.dataset.d);
       const roll = rollDie(d);
-      sendRollToDnDBeyond(`d${d}`, roll, `d${d}`, char.name);
+      sendRoll(`d${d}`, roll, `d${d}`, char.name);
     });
   });
 
   document.getElementById('roll-init')?.addEventListener('click', () => {
     const roll = rollDie(20);
     const total = roll + derived.initiativeBonus;
-    sendRollToDnDBeyond('Initiative', total, `d20 (${roll}) + ${derived.initiativeBonus}`, char.name);
+    sendRoll('Initiative', total, `d20 (${roll}) + ${derived.initiativeBonus}`, char.name);
   });
 
   tc.querySelectorAll('.attack-btn-hit').forEach(btn => {
@@ -807,7 +823,7 @@ function renderCombatTab(tc) {
       const roll = rollDie(20);
       const total = roll + bonus;
       const isCrit = roll === 20;
-      sendRollToDnDBeyond(`Attack${isCrit?' (CRIT!)':''}`, total, `d20 (${roll}) ${formatMod(bonus)}`, char.name);
+      sendRoll(`Attack${isCrit?' (CRIT!)':''}`, total, `d20 (${roll}) ${formatMod(bonus)}`, char.name);
     });
   });
 
@@ -818,7 +834,7 @@ function renderCombatTab(tc) {
       const [count, sides] = formula.split('d').map(Number);
       const { total, rolls } = rollDice(count, sides);
       const finalTotal = total + bonus;
-      sendRollToDnDBeyond('Damage', finalTotal, `${formula} (${rolls.join('+')}) ${formatMod(bonus)}`, char.name);
+      sendRoll('Damage', finalTotal, `${formula} (${rolls.join('+')}) ${formatMod(bonus)}`, char.name);
     });
   });
 
@@ -850,13 +866,7 @@ function renderCombatTab(tc) {
   // Trick shots
   tc.querySelectorAll('.trick-use').forEach(btn => {
     btn.addEventListener('click', () => {
-      const cost = parseInt(btn.dataset.cost);
-      const name = btn.dataset.name;
-      if (cost > 0) {
-        mutate(() => { data.nerveDiceCurrent = Math.max(0, (data.nerveDiceCurrent ?? 0) - cost); });
-      }
-      // Showmanship: if target fails save regain 1 ND — remind player
-      showMsg(`${name} used! ${cost > 0 ? cost + ' Nerve ' + (cost === 1 ? 'Die' : 'Dice') + ' spent.' : 'Free (Signature).'} Roll to hit first, then declare.`);
+      useTrickShot(btn.dataset.id, btn.dataset.name, parseInt(btn.dataset.cost));
     });
   });
 
@@ -866,14 +876,14 @@ function renderCombatTab(tc) {
       const roll = rollDie(20);
       const total = roll + derived.spellAttackBonus;
       const isCrit = roll === 20;
-      sendRollToDnDBeyond(`Spell attack${isCrit?' (CRIT!)':''}`, total, `d20 (${roll}) ${formatMod(derived.spellAttackBonus)}`, char.name);
+      sendRoll(`Spell attack${isCrit?' (CRIT!)':''}`, total, `d20 (${roll}) ${formatMod(derived.spellAttackBonus)}`, char.name);
     });
   });
   tc.querySelectorAll('.spell-dmg-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const [count, sides] = btn.dataset.dice.split('d').map(Number);
       const { total, rolls } = rollDice(count, sides);
-      sendRollToDnDBeyond('Spell damage', total, `${btn.dataset.dice} (${rolls.join('+')})`, char.name);
+      sendRoll('Spell damage', total, `${btn.dataset.dice} (${rolls.join('+')})`, char.name);
     });
   });
   tc.querySelectorAll('.spell-slot-btn').forEach(btn => {
@@ -905,7 +915,7 @@ function renderCombatTab(tc) {
     btn.addEventListener('click', () => {
       const effect = btn.dataset.effect;
       mutate(() => { data.nerveDiceCurrent = Math.max(0, (data.nerveDiceCurrent ?? 0) - 2); });
-      showMsg(`Called Shot: ${effect}. Target makes Con save DC ${derived.calledShotDC}. 2 Nerve Dice spent.`);
+      sendNotice(`Called shot: ${effect.split(' (')[0]}`, `2 Nerve Dice spent · Constitution save DC ${derived.calledShotDC}`, char.name);
     });
   });
 }
@@ -920,7 +930,8 @@ function renderAttackRow(item) {
     <div>
       <div class="attack-name">${item.name}</div>
       <div class="attack-detail">${item.range ? `Range ${item.range}` : 'Melee'} · ${item.damage || '—'} ${item.damageType || ''}</div>
-      ${misfire ? `<div class="attack-misfire">Misfire: ${misfire}+</div>` : ''}
+      ${item.weaponType === 'firearm' && (item.reload || misfire) ? `<div class="attack-misfire">${item.reload ? 'Reload ' + item.reload : ''}${item.reload && misfire ? ' · ' : ''}${misfire ? 'Misfire ' + misfire : ''}</div>` : (misfire ? `<div class="attack-misfire">Misfire ${misfire}</div>` : '')}
+      ${item.weaponType === 'firearm' && item.detail ? `<div class="attack-detail">${item.detail}</div>` : ''}
       ${hasCharges ? `
         <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.35rem; flex-wrap:wrap;">
           <div class="slot-pips">
@@ -985,6 +996,25 @@ function renderCombatSpellsPanel() {
   </div>`;
 }
 
+// Trick Shots that force a saving throw (DC = Trick Shot DC)
+const TRICK_SHOT_SAVES = {
+  'disarming-shot': 'Strength',
+  'pinning-shot':   'Strength',
+  'warning-shot':   'Wisdom',
+  'shatter-shot':   'Constitution',
+};
+
+// Announce a Trick Shot: spend the Nerve Dice (dice are spent, not rolled) and
+// post it to the character's Discord.
+function useTrickShot(id, name, cost) {
+  if (cost > 0) {
+    mutate(() => { data.nerveDiceCurrent = Math.max(0, (data.nerveDiceCurrent ?? 0) - cost); });
+  }
+  const parts = [cost > 0 ? `${cost} Nerve ${cost === 1 ? 'Die' : 'Dice'} spent` : 'Free (Signature Move)'];
+  if (TRICK_SHOT_SAVES[id]) parts.push(`${TRICK_SHOT_SAVES[id]} save DC ${derived.trickShotDC}`);
+  sendNotice(`Trick shot: ${name}`, parts.join(' · '), char.name);
+}
+
 function renderTrickShotPanel() {
   const known = data.selectedTrickShots || [];
   const sig = data.signatureMove;
@@ -995,14 +1025,14 @@ function renderTrickShotPanel() {
     <div class="card-title">Trick shots · DC ${derived.trickShotDC}</div>
     ${options.map(s => {
       const isSig = s.id === sig;
-      const cost = isSig ? Math.max(0, s.cost - 1) : s.cost; // min 0 here is fine — nerve tab shows current cost, sig bonus applied once per turn in play
+      const cost = isSig ? signatureCost(s.cost) : s.cost; // Signature Move: once per turn, one die cheaper
       return `<div class="nerve-action">
         <div class="nerve-action-info">
           <div class="nerve-action-name">${s.name} ${isSig ? '<span style="font-size:0.72rem; color:var(--green); font-family:var(--font-display);">SIGNATURE</span>' : ''}</div>
           <div class="nerve-action-meta">${s.description}</div>
         </div>
-        ${cost > 0 ? `<div class="nerve-cost">${cost} die</div>` : '<div class="nerve-cost" style="background:var(--green-dim); color:var(--green); border-color:var(--green);">Free 1/turn</div>'}
-        <button class="btn btn-sm trick-use" data-cost="${cost}" data-name="${s.name}"
+        ${cost > 0 ? `<div class="nerve-cost">${cost} ${cost === 1 ? 'die' : 'dice'}</div>` : '<div class="nerve-cost" style="background:var(--green-dim); color:var(--green); border-color:var(--green);">Free 1/turn</div>'}
+        <button class="btn btn-sm trick-use" data-cost="${cost}" data-id="${s.id}" data-name="${s.name}"
           ${nd < cost ? 'disabled' : ''}>Use</button>
       </div>`;
     }).join('')}
@@ -1053,7 +1083,7 @@ function renderNerveTab(tc) {
     <div class="card" style="margin-bottom:1rem;">
       <div class="section-header">
         <div class="card-title" style="margin:0;">Nerve dice · d${nd.dieSize} · ${current} / ${nd.count} remaining</div>
-        <button class="btn btn-sm" id="nd-regain-kill">Regain 1 (kill)</button>
+        <button class="btn btn-sm" id="nd-regain-kill" title="You reduced a hostile creature to 0 HP with a firearm attack on your turn, and that attack didn't have a Nerve Die expended on it">Regain 1 (kill)</button>
       </div>
       <div class="nerve-pool" id="nerve-pool">
         ${Array.from({length: nd.count}, (_, i) => `
@@ -1066,28 +1096,20 @@ function renderNerveTab(tc) {
     </div>
     <div class="card">
       <div class="card-title">Spend nerve dice</div>
-      ${(() => {
-        const baseOptions = OUTLAW.nerveDiceOptions.filter(o => char.level >= o.levelRequired);
-        const archOptions = (data.archetypeId && OUTLAW.archetypes[data.archetypeId]?.nerveDiceOptions || [])
-          .filter(o => char.level >= o.levelRequired);
-        return [...baseOptions, ...archOptions].map(o => {
-            const suppDC = 8 + derived.prof + derived.mods.dexterity;
-            let desc = o.description
-              .replace('DC = 8 + proficiency + Dex mod', `DC ${suppDC}`)
-              .replace('DC = 8 + proficiency bonus + Dex mod', `DC ${suppDC}`);
-            return `
-              <div class="nerve-action">
-                <div class="nerve-action-info">
-                  <div class="nerve-action-name">${o.name}</div>
-                  <div class="nerve-action-meta">${o.action} · ${desc}</div>
-                </div>
-                <div class="nerve-cost">${o.cost} die</div>
-                <button class="btn btn-sm nd-spend ${current < o.cost ? '' : 'btn-gold'}"
-                  data-cost="${o.cost}" data-name="${o.name}" ${current < o.cost ? 'disabled' : ''}>Use</button>
+      ${getNerveOptions().map(o => {
+          const desc = o.description.replace(/\{DC\}/g, derived.coveringFireDC);
+          return `
+            <div class="nerve-action">
+              <div class="nerve-action-info">
+                <div class="nerve-action-name">${o.name}</div>
+                <div class="nerve-action-meta">${o.action} · ${desc}</div>
               </div>
-            `;
-          }).join('');
-      })()}
+              <div class="nerve-cost">${o.cost} ${o.cost === 1 ? 'die' : 'dice'}</div>
+              <button class="btn btn-sm nd-spend ${current < o.cost ? '' : 'btn-gold'}"
+                data-id="${o.id}" ${current < o.cost ? 'disabled' : ''}>Use</button>
+            </div>
+          `;
+        }).join('')}
     </div>
   `;
 
@@ -1105,26 +1127,37 @@ function renderNerveTab(tc) {
 
   tc.querySelectorAll('.nd-spend').forEach(btn => {
     btn.addEventListener('click', () => {
-      const cost = parseInt(btn.dataset.cost);
-      const name = btn.dataset.name;
+      const opt = getNerveOptions().find(o => o.id === btn.dataset.id);
+      if (!opt) return;
+      const cost = opt.cost;
       mutate(() => { data.nerveDiceCurrent = Math.max(0, (data.nerveDiceCurrent ?? 0) - cost); });
-      // Roll all spent nerve dice and show result
-      let totalRoll = 0;
-      const rolls = [];
-      for (let i = 0; i < cost; i++) {
-        const r = rollDie(nd.dieSize);
-        rolls.push(r);
-        totalRoll += r;
-      }
-      const rollBreakdown = `${cost}d${nd.dieSize} (${rolls.join('+')})`;
-      if (name === 'Graze') {
-        const total = totalRoll + derived.mods.intelligence;
-        sendRollToDnDBeyond('Graze (damage reduction)', total, `${rollBreakdown} + Int (${formatMod(derived.mods.intelligence)})`, char.name);
+      if (opt.roll === 'die') {
+        // Steady Shot / Duck and Weave: the spent die is rolled and its result is used
+        let totalRoll = 0;
+        const rolls = [];
+        for (let i = 0; i < cost; i++) {
+          const r = rollDie(nd.dieSize);
+          rolls.push(r);
+          totalRoll += r;
+        }
+        sendRoll(opt.name, totalRoll, `${cost}d${nd.dieSize} (${rolls.join('+')}) · add ${opt.rollUse || 'to the roll'}`, char.name);
       } else {
-        sendRollToDnDBeyond(`${name}`, totalRoll, rollBreakdown, char.name);
+        // Covering Fire / Quick Draw / Desperado reactions: dice are spent, nothing is rolled
+        const parts = [`${cost} Nerve ${cost === 1 ? 'Die' : 'Dice'} spent`];
+        if (opt.id === 'covering-fire') parts.push(`Dexterity save DC ${derived.coveringFireDC}`);
+        sendNotice(opt.name, parts.join(' · '), char.name);
       }
     });
   });
+}
+
+// Nerve Die spend options available to this character right now
+// (base Outlaw options + any granted by their archetype, filtered by level).
+function getNerveOptions() {
+  const base = OUTLAW.nerveDiceOptions.filter(o => char.level >= o.levelRequired);
+  const arch = (data.archetypeId && OUTLAW.archetypes[data.archetypeId]?.nerveDiceOptions || [])
+    .filter(o => char.level >= o.levelRequired);
+  return [...base, ...arch];
 }
 
 // Built-in class features whose description has its own "usable X times per
@@ -1136,6 +1169,8 @@ const CLASS_FEATURE_LIMITS = {
   // Hexer
   'malevolent-mark':       [{ recharge: 'short', max: () => Math.max(1, derived.mods.intelligence) }],
   'communicable-curse':    [{ recharge: 'short', max: () => Math.max(1, derived.mods.intelligence) }],
+  // Outlaw (Gunslinger)
+  'legendary-duel':        [{ recharge: 'long',  max: () => 1 }],
   'unbridled-torment':     [{ recharge: 'long',  max: () => Math.max(1, derived.mods.intelligence) }],
   // Mutator
   'organic-fortitude':     [
@@ -1291,22 +1326,16 @@ function renderFeaturesTab(tc) {
     ${unlocked.map(f => {
       // Inject live DCs into descriptions
       let desc = f.description;
-      if (f.id === 'called-shot' || f.id === 'suppressing-fire') {
-        desc = desc.replace(/DC = 8 \+ proficiency bonus \+ Dexterity modifier/g,
-          `DC ${derived.calledShotDC || derived.trickShotDC || (8 + derived.prof + derived.mods.dexterity)}`);
-        desc = desc.replace(/DC = 8 \+ proficiency \+ Dex mod/g,
-          `DC ${8 + derived.prof + derived.mods.dexterity}`);
+      if (f.id === 'called-shot' || f.id === 'the-legend') {
+        const dexDC = 8 + derived.prof + derived.mods.dexterity;
+        desc = desc.replace(/DC = 8 \+ (?:your )?proficiency bonus \+ (?:your )?Dexterity modifier/g, `DC ${dexDC}`);
       }
       if (f.id === 'showstopper') {
         desc = desc.replace(/DC = Trick Shot DC/g, `DC ${derived.trickShotDC}`);
         desc = desc.replace(/Trick Shot DC\)/g, `Trick Shot DC ${derived.trickShotDC})`);
       }
-      if (f.id === 'runic-barrel') {
-        desc = desc.replace(/Con save/g, `Con save (DC ${derived.spellSaveDC})`);
-      }
-      if (f.id === 'arcane-overload') {
-        desc = desc.replace(/Con save/g, `Con save (DC ${derived.spellSaveDC})`);
-        desc = desc.replace(/Str save/g, `Str save (DC ${derived.spellSaveDC})`);
+      if (f.id === 'runic-barrel' || f.id === 'arcane-overload') {
+        desc = desc.replace(/your spell save DC/g, `your spell save DC (${derived.spellSaveDC})`);
       }
       if (f.id === 'unbreakable') {
         desc = desc.replace(/spend 2 Nerve Dice to succeed/g,
@@ -1865,12 +1894,8 @@ function showAddItemModal(hbItems, customMode) {
     { id:'lcrossbow',    name:'Light crossbow', damage:'1d8', damageType:'Piercing', weaponType:'ranged',   range:'80/320',   weaponCategory:'simple' },
     { id:'shortbow',     name:'Shortbow',       damage:'1d6', damageType:'Piercing', weaponType:'ranged',   range:'80/320',   weaponCategory:'simple' },
     { id:'longbow',      name:'Longbow',        damage:'1d8', damageType:'Piercing', weaponType:'ranged',   range:'150/600',  weaponCategory:'martial' },
-    // Firearms (Outlaw)
-    { id:'pistol',       name:'Pistol',         damage:'1d10',damageType:'Piercing', weaponType:'firearm',  range:'30/90',    weaponCategory:'martial', misfire:1 },
-    { id:'musket',       name:'Musket',         damage:'1d12',damageType:'Piercing', weaponType:'firearm',  range:'40/120',   weaponCategory:'martial', misfire:2 },
-    { id:'blunderbuss',  name:'Blunderbuss',    damage:'2d8', damageType:'Piercing', weaponType:'firearm',  range:'15/—',     weaponCategory:'martial', misfire:2, detail:'5ft cone, all in range' },
-    { id:'pepperbox',    name:'Pepperbox',      damage:'1d10',damageType:'Piercing', weaponType:'firearm',  range:'30/90',    weaponCategory:'martial', misfire:2, detail:'6 shots before reload' },
-    { id:'dragon-pistol',name:'Dragon pistol',  damage:'1d8', damageType:'Piercing', weaponType:'firearm',  range:'10/—',     weaponCategory:'martial', misfire:2, detail:'15ft cone' },
+    // Firearms (Outlaw) — suggested weapons from the Outlaw document
+    ...OUTLAW_FIREARMS,
     { id:'bullets',      name:'Bullets (20)',   detail:'Ammunition', quantity:20 },
     // Armour
     { id:'leather',      name:'Leather armor',      baseAC:11, armorType:'light' },
@@ -1953,7 +1978,8 @@ function showAddItemModal(hbItems, customMode) {
           <div class="dm-char-row add-item-row" data-id="${item.id}" style="cursor:pointer;">
             <div>
               <div class="dm-char-name">${item.name}</div>
-              <div class="dm-char-meta">${item.damage ? item.damage + ' ' + (item.damageType||'') : item.baseAC ? 'AC ' + item.baseAC + ' (' + item.armorType + ')' : item.detail||''}</div>
+              <div class="dm-char-meta">${item.damage ? item.damage + ' ' + (item.damageType||'') + (item.range ? ' · ' + item.range : '') + (item.reload ? ' · Reload ' + item.reload : '') + (item.misfire ? ' · Misfire ' + item.misfire : '') : item.baseAC ? 'AC ' + item.baseAC + ' (' + item.armorType + ')' : item.detail||''}</div>
+              ${item.weaponType === 'firearm' && item.detail ? `<div style="font-size:0.78rem; color:var(--text-dim); margin-top:0.2rem; max-width:420px;">${item.detail}</div>` : ''}
               ${item.requiresAttunement ? `<div style="font-size:0.75rem; color:var(--gold); margin-top:0.15rem;">Requires attunement${item.attunementRequirement ? ` (${item.attunementRequirement})` : ''}</div>` : ''}
               ${item.description ? `<div style="font-size:0.78rem; color:var(--text-dim); margin-top:0.25rem; max-width:420px;">${item.description}</div>` : ''}
             </div>
@@ -2221,7 +2247,7 @@ function renderTrickShotsTab(tc) {
         ${allShots.map(s => {
           const isKnown = known.includes(s.id);
           const isSig = sig === s.id;
-          const effectiveCost = isSig ? Math.max(1, s.cost - 1) : s.cost;
+          const effectiveCost = isSig ? signatureCost(s.cost) : s.cost;
           const canSelect = isKnown || known.length < totalAllowed;
           return `
             <div style="border:1px solid ${isKnown ? 'var(--gold-dim)' : 'var(--border)'}; border-radius:var(--radius); padding:0.6rem 0.75rem; background:${isKnown ? 'var(--gold-glow)' : 'var(--bg-raised)'};">
@@ -2234,13 +2260,11 @@ function renderTrickShotsTab(tc) {
                     ${isSig ? '<span style="font-size:0.72rem; color:var(--green); font-family:var(--font-display); letter-spacing:0.08em;">SIGNATURE</span>' : ''}
                   </div>
                   <div style="font-size:0.83rem; color:var(--text-dim); margin-top:0.2rem;">${s.description}</div>
-                  ${s.id === 'disarming-shot' || s.id === 'pinning-shot' ? `<div style="font-size:0.8rem; color:var(--gold); margin-top:0.2rem;">Strength save DC ${derived.trickShotDC}</div>` : ''}
-                  ${s.id === 'warning-shot' ? `<div style="font-size:0.8rem; color:var(--gold); margin-top:0.2rem;">Wisdom save DC ${derived.trickShotDC}</div>` : ''}
-                  ${s.id === 'shatter-shot' ? `<div style="font-size:0.8rem; color:var(--gold); margin-top:0.2rem;">Constitution save DC ${derived.trickShotDC} (target has disadvantage)</div>` : ''}
+                  ${TRICK_SHOT_SAVES[s.id] ? `<div style="font-size:0.8rem; color:var(--gold); margin-top:0.2rem;">${TRICK_SHOT_SAVES[s.id]} save DC ${derived.trickShotDC}${s.id === 'shatter-shot' ? ' (triggering target has disadvantage)' : ''}</div>` : ''}
                 </div>
                 ${isKnown ? `<button class="btn btn-sm trick-use ${nd < effectiveCost ? '' : 'btn-gold'}"
-                  data-cost="${effectiveCost}" data-name="${s.name}"
-                  ${nd < effectiveCost ? 'disabled' : ''}>Use (${effectiveCost} ${effectiveCost === 1 ? 'die' : 'dice'})</button>` : ''}
+                  data-cost="${effectiveCost}" data-id="${s.id}" data-name="${s.name}"
+                  ${nd < effectiveCost ? 'disabled' : ''}>Use (${effectiveCost === 0 ? 'free' : effectiveCost + (effectiveCost === 1 ? ' die' : ' dice')})</button>` : ''}
               </div>
             </div>
           `;
@@ -2254,7 +2278,7 @@ function renderTrickShotsTab(tc) {
       <div class="card">
         <div class="card-title">Signature move</div>
         <p style="font-size:0.85rem; color:var(--text-dim); margin-bottom:0.75rem;">
-          Once per turn, your signature move costs 1 fewer Nerve Die. You may change it on a long rest.
+          Once per turn you may use your Signature Move without expending a Nerve Die (a Trick Shot that costs two dice only costs one). You may change it on a long rest.
         </p>
         <div style="display:flex; flex-direction:column; gap:0.4rem;">
           ${known.map(id => {
@@ -2269,7 +2293,7 @@ function renderTrickShotsTab(tc) {
                 <input type="radio" name="sig-radio" value="${s.id}" ${isSig ? 'checked' : ''} />
                 <div style="flex:1;">
                   <div style="font-weight:500;">${s.name}</div>
-                  <div style="font-size:0.8rem; color:var(--text-dim);">Cost reduced by 1 die once per turn</div>
+                  <div style="font-size:0.8rem; color:var(--text-dim);">Costs ${signatureCost(s.cost)} ${signatureCost(s.cost) === 1 ? 'die' : 'dice'} instead of ${s.cost} once per turn</div>
                 </div>
                 ${isSig ? '<span style="font-size:0.75rem; color:var(--green); font-family:var(--font-display);">ACTIVE</span>' : ''}
               </label>
@@ -2313,18 +2337,10 @@ function renderTrickShotsTab(tc) {
     });
   });
 
-  // Use buttons (same logic as combat tab trick shots)
-  const ndData = getNerveDice(char.level);
+  // Use buttons (same logic as the combat tab panel)
   tc.querySelectorAll('.trick-use').forEach(btn => {
     btn.addEventListener('click', () => {
-      const cost = parseInt(btn.dataset.cost);
-      const name = btn.dataset.name;
-      mutate(() => { data.nerveDiceCurrent = Math.max(0, (data.nerveDiceCurrent ?? 0) - cost); });
-      let total = 0;
-      const rolls = [];
-      for (let i = 0; i < cost; i++) { const r = rollDie(ndData.dieSize); rolls.push(r); total += r; }
-      if (cost > 0) sendRollToDnDBeyond(`Trick shot: ${name}`, total, `${cost}d${ndData.dieSize} (${rolls.join('+')})`, char.name);
-      else showMsg(`${name} used — free this turn (Signature Move).`);
+      useTrickShot(btn.dataset.id, btn.dataset.name, parseInt(btn.dataset.cost));
     });
   });
 }
@@ -2698,7 +2714,7 @@ function renderCursesTab(tc) {
     });
   });
 
-  // Use curse — spend sigils and send to DnDBeyond
+  // Use curse — spend sigils and post the roll
   tc.querySelectorAll('.curse-use').forEach(btn => {
     btn.addEventListener('click', () => {
       const cost = parseInt(btn.dataset.cost);
@@ -2716,7 +2732,7 @@ function renderCursesTab(tc) {
     const roll = rollDie(10);
     const result = HEXER.arcaneReleaseTable.find(r => r.roll === roll);
     mutate(() => { data.arcaneReleaseUsed = Math.min(arcaneReleaseMax, (data.arcaneReleaseUsed || 0) + 1); });
-    sendRollToDnDBeyond('Arcane Release', roll, `d10 → ${result?.effect || roll}`, char.name);
+    sendRoll('Arcane Release', roll, `d10 → ${result?.effect || roll}`, char.name);
     showMsg(`Arcane Release: ${roll} — ${result?.effect || ''}`);
   });
 }
@@ -3196,6 +3212,107 @@ function wireAddFeat(tc) {
   });
 }
 
+// ── Discord webhook modal (per character) ───────────────────────────────────
+function showDiscordModal() {
+  document.getElementById('discord-modal-overlay')?.remove();
+  const current = data.discordWebhook || '';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'discord-modal-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:520px;">
+      <div class="modal-title">Discord · ${escapeHtml(char.name)}</div>
+      <p style="font-size:0.9rem; color:var(--text-dim); line-height:1.6; margin-bottom:1rem;">
+        Rolls made on <strong style="color:var(--text)">this character's sheet</strong> are posted to the Discord channel this webhook points at.
+        Each character has its own webhook, so you can play different characters in different servers.
+      </p>
+      <div class="form-group">
+        <label>Webhook URL</label>
+        <input class="form-input" id="dc-url" type="text" autocomplete="off" spellcheck="false"
+          placeholder="https://discord.com/api/webhooks/…" value="${escapeHtml(current)}" />
+        <div id="dc-error" style="font-size:0.82rem; color:var(--red); margin-top:0.35rem; min-height:1.1em;"></div>
+      </div>
+      <div style="background:var(--bg-raised); border-radius:var(--radius); padding:0.65rem 0.85rem; font-size:0.82rem; color:var(--text-dim); line-height:1.6; margin-bottom:0.9rem;">
+        <strong style="color:var(--text)">Get one:</strong> in Discord open <em>Server Settings → Integrations → Webhooks → New Webhook</em>, pick a channel, then <em>Copy Webhook URL</em>.
+        Anyone with the URL can post to that channel, so don't share it. The DM can see it on your character.
+      </div>
+      <div id="dc-ext" style="font-size:0.78rem; color:var(--text-muted); margin-bottom:1rem;">Checking for the browser extension…</div>
+      <div class="modal-footer" style="justify-content:space-between; flex-wrap:wrap; gap:0.5rem;">
+        <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+          <button class="btn btn-sm" id="dc-test">Send test message</button>
+          <button class="btn btn-sm btn-danger" id="dc-clear" ${current ? '' : 'disabled'}>Remove webhook</button>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          <button class="btn" id="dc-cancel">Cancel</button>
+          <button class="btn btn-gold" id="dc-save">Save</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const urlInput = overlay.querySelector('#dc-url');
+  const errEl = overlay.querySelector('#dc-error');
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  overlay.querySelector('#dc-cancel').addEventListener('click', close);
+
+  detectExtension().then(v => {
+    const el = overlay.querySelector('#dc-ext');
+    if (!el) return;
+    el.textContent = v
+      ? 'Browser extension detected — rolls will be posted through it.'
+      : 'No browser extension needed — rolls are posted straight from this page.';
+  });
+
+  function readUrl() {
+    const url = urlInput.value.trim();
+    if (url && !isValidWebhookUrl(url)) {
+      errEl.textContent = 'That doesn\'t look like a Discord webhook URL. It should start with https://discord.com/api/webhooks/';
+      return null;
+    }
+    errEl.textContent = '';
+    return url;
+  }
+
+  overlay.querySelector('#dc-test').addEventListener('click', async (e) => {
+    const url = readUrl();
+    if (url === null) return;
+    if (!url) { errEl.textContent = 'Paste a webhook URL first.'; return; }
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = 'Sending…';
+    const result = await postToDiscord(url, buildNoticeBody({
+      characterName: char.name,
+      label: 'Webhook connected ✔',
+      detail: `Rolls for ${char.name} will appear here.`,
+    }), { label: 'Test message', total: '', character: char.name });
+    btn.disabled = false; btn.textContent = 'Send test message';
+    if (result.ok) errEl.innerHTML = '<span style="color:var(--green);">Sent! Check your Discord channel.</span>';
+    else errEl.textContent = result.error || 'The test message could not be sent.';
+  });
+
+  overlay.querySelector('#dc-save').addEventListener('click', () => {
+    const url = readUrl();
+    if (url === null) return;
+    mutate(() => { data.discordWebhook = url || null; });
+    setRollWebhook(data.discordWebhook);
+    showMsg(url ? 'Discord webhook saved.' : 'Discord webhook removed.');
+    close();
+  });
+
+  overlay.querySelector('#dc-clear').addEventListener('click', () => {
+    mutate(() => { data.discordWebhook = null; });
+    setRollWebhook(null);
+    showMsg('Discord webhook removed.');
+    close();
+  });
+}
+
+function escapeHtml(str) {
+  return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 // ── Short rest modal ─────────────────────────────────────────────────────────
 function showShortRestModal() {
   const hitDie = getClassHitDie(char.class_id);
@@ -3206,6 +3323,7 @@ function showShortRestModal() {
   const currentHP = data.currentHP ?? mhp;
   const missingHP = mhp - currentHP;
   const ndRecovery = shortRestNerveDiceRecovery({ level: char.level, classId: char.class_id });
+  const ndRecoveryLabel = ndRecovery >= 999 ? 'all' : ndRecovery; // The Legend recovers every die
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -3215,7 +3333,7 @@ function showShortRestModal() {
       <div style="font-size:0.9rem; color:var(--text-dim); margin-bottom:1rem;">
         <div>Available hit dice: <strong style="color:var(--text)">${availableDice} / ${maxDice}</strong> — each die heals 1d${hitDie} + Con mod</div>
         <div>Current HP: <strong style="color:var(--text)">${currentHP} / ${mhp}</strong> (missing ${missingHP})</div>
-        ${ndRecovery > 0 ? `<div>Nerve Dice recovered: <strong style="color:var(--gold)">${ndRecovery}</strong></div>` : ''}
+        ${ndRecovery > 0 ? `<div>Nerve Dice recovered: <strong style="color:var(--gold)">${ndRecoveryLabel}</strong></div>` : ''}
       </div>
       ${availableDice === 0 ? `
         <div style="padding:0.75rem; background:var(--bg-raised); border-radius:var(--radius); color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">
@@ -3272,7 +3390,7 @@ function showShortRestModal() {
         if (item.maxCharges && item.chargeRecharge === 'short') item.charges = item.maxCharges;
       });
     });
-    sendRollToDnDBeyond(
+    sendRoll(
       `Short rest (${diceToSpend}d${hitDie})`,
       totalHealed,
       `${diceToSpend}d${hitDie} + Con [${rolls.join(', ')}] = ${totalHealed} HP`,
@@ -3302,7 +3420,7 @@ function showShortRestModal() {
       });
     });
     showMsg('Short rest complete.'
-      + (ndRecovery > 0 ? ` Recovered ${ndRecovery} Nerve Dice.` : '')
+      + (ndRecovery > 0 ? ` Recovered ${ndRecoveryLabel} Nerve Dice.` : '')
       + (char.class_id === 'mutator' ? ' Biomass restored.' : '')
       + (char.class_id === 'hexer' && data.disciplineId === 'hellion' ? ' Arcane Release restored.' : '')
     );

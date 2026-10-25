@@ -1,5 +1,5 @@
 import { saveCharacter, getAllHomebrew } from '../lib/db.js';
-import { OUTLAW } from '../lib/classes/outlaw.js';
+import { OUTLAW, OUTLAW_FIREARMS, OUTLAW_RULES_VERSION } from '../lib/classes/outlaw.js';
 import { MUTATOR } from '../lib/classes/mutator.js';
 import { HEXER } from '../lib/classes/hexer.js';
 // Helper to get class definition by ID
@@ -411,19 +411,13 @@ export async function renderCharacterCreation(container, userId, navigate) {
       draft.weaponPicks = draft.weaponPicks || {};
 
       // All firearms for pickers
-      const FIREARMS = [
-        { id:'pistol',        name:'Pistol',         damage:'1d10', range:'30/90',   misfire:1 },
-        { id:'musket',        name:'Musket',         damage:'1d12', range:'40/120',  misfire:2 },
-        { id:'blunderbuss',   name:'Blunderbuss',    damage:'2d8',  range:'15/—',    misfire:2 },
-        { id:'pepperbox',     name:'Pepperbox',      damage:'1d10', range:'30/90',   misfire:2 },
-        { id:'dragon-pistol', name:'Dragon pistol',  damage:'1d8',  range:'10/—',    misfire:2 },
-      ];
+      const FIREARMS = OUTLAW_FIREARMS;
       const MARTIAL_MELEE = [
         { id:'longsword',  name:'Longsword',  damage:'1d8'  },
         { id:'rapier',     name:'Rapier',     damage:'1d8'  },
         { id:'greataxe',   name:'Greataxe',   damage:'1d12' },
         { id:'greatsword', name:'Greatsword', damage:'2d6'  },
-        { id:'longsword',  name:'Warhammer',  damage:'1d8'  },
+        { id:'warhammer',  name:'Warhammer',  damage:'1d8'  },
         { id:'battleaxe',  name:'Battleaxe',  damage:'1d8'  },
         { id:'halberd',    name:'Halberd',    damage:'1d10' },
         { id:'longbow',    name:'Longbow (ranged)', damage:'1d8', range:'150/600' },
@@ -828,19 +822,14 @@ export async function renderCharacterCreation(container, userId, navigate) {
 
       // Weapon lookup tables (mirrors step 5 pools)
       const EQ_WEAPON_POOLS = {
-        firearm: [
-          { id:'pistol',        name:'Pistol',         damage:'1d10', damageType:'Piercing', weaponType:'firearm',  range:'30/90',   misfire:1 },
-          { id:'musket',        name:'Musket',         damage:'1d12', damageType:'Piercing', weaponType:'firearm',  range:'40/120',  misfire:2 },
-          { id:'blunderbuss',   name:'Blunderbuss',    damage:'2d8',  damageType:'Piercing', weaponType:'firearm',  range:'15/—',    misfire:2 },
-          { id:'pepperbox',     name:'Pepperbox',      damage:'1d10', damageType:'Piercing', weaponType:'firearm',  range:'30/90',   misfire:2 },
-          { id:'dragon-pistol', name:'Dragon pistol',  damage:'1d8',  damageType:'Piercing', weaponType:'firearm',  range:'10/—',    misfire:2 },
-        ],
+        firearm: OUTLAW_FIREARMS,
         martial: [
           { id:'longsword',    name:'Longsword',    damage:'1d8',  damageType:'Slashing', weaponType:'melee' },
           { id:'rapier',       name:'Rapier',       damage:'1d8',  damageType:'Piercing', weaponType:'melee', finesse:true },
           { id:'greataxe',     name:'Greataxe',     damage:'1d12', damageType:'Slashing', weaponType:'melee' },
           { id:'greatsword',   name:'Greatsword',   damage:'2d6',  damageType:'Slashing', weaponType:'melee' },
           { id:'battleaxe',    name:'Battleaxe',    damage:'1d8',  damageType:'Slashing', weaponType:'melee' },
+          { id:'warhammer',    name:'Warhammer',    damage:'1d8',  damageType:'Bludgeoning', weaponType:'melee' },
           { id:'halberd',      name:'Halberd',      damage:'1d10', damageType:'Slashing', weaponType:'melee' },
           { id:'longbow',      name:'Longbow',      damage:'1d8',  damageType:'Piercing', weaponType:'ranged', range:'150/600' },
           { id:'hcrossbow',    name:'Hand crossbow',damage:'1d6',  damageType:'Piercing', weaponType:'ranged', range:'30/120'  },
@@ -868,6 +857,7 @@ export async function renderCharacterCreation(container, userId, navigate) {
           isShield: template.isShield || false,
           range: template.range || null,
           misfire: template.misfire || null,
+          reload: template.reload || null,
           finesse: template.finesse || false,
           detail: template.detail || null,
           quantity: template.quantity || 1,
@@ -907,6 +897,8 @@ export async function renderCharacterCreation(container, userId, navigate) {
             const pool = EQ_WEAPON_POOLS[opt.pickFromCategory] || [];
             const template = pool.find(w => w.id === picks[0]) || pool[0];
             if (template) startingInventory.push(makeInventoryItem({ ...template, quantity: 1 }));
+            // Any extra items bundled with the pick (e.g. a hand crossbow and bolts)
+            (opt.items || []).forEach(item => startingInventory.push(makeInventoryItem(item)));
           } else {
             // Fixed items list
             (opt.items || []).forEach(item => {
@@ -978,8 +970,10 @@ export async function renderCharacterCreation(container, userId, navigate) {
           recklessFusillade: { used: 0 },
           legendaryDuel: { used: false },
           runeActive: 'None',
+          outlawRulesVersion: draft.classId === 'outlaw' ? OUTLAW_RULES_VERSION : undefined,
+          discordWebhook: null,
           notes: draft.notes,
-          currency: { gp: 0, sp: 0, cp: 0 },
+          currency: { gp: classDef.startingGold || 0, sp: 0, cp: 0 },
           preparedSpells: [],
           knownSpells: [],
           cantrips: [],

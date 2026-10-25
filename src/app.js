@@ -4,6 +4,7 @@ import { renderCharacterList } from './pages/characterList.js';
 import { renderCharacterCreation } from './pages/characterCreation.js';
 import { renderDMView } from './pages/dmView.js';
 import { renderHomebrewEditor } from './pages/homebrewEditor.js';
+import { isValidWebhookUrl, buildRollBody, buildNoticeBody, postToDiscord } from './lib/discord.js';
 // sheet.js is loaded lazily — only when a character is opened
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ async function render() {
           <button class="btn btn-sm ${appState.playerViewActive ? 'btn-gold' : ''}" id="nav-playerview" title="Toggle player view">
             ${appState.playerViewActive ? 'Player view ON' : 'Player view'}
           </button>` : ''}
-        <button class="btn btn-sm" id="nav-extension" title="Install the browser extension to send rolls to DnDBeyond">Get Extension</button>
+        <button class="btn btn-sm" id="nav-extension" title="Optional browser extension for posting rolls to Discord">Discord Extension</button>
         <button class="btn btn-sm" id="nav-chars">My Characters</button>
         <span class="nav-user">${appState.session.user.email}</span>
         <button class="btn btn-sm btn-danger" id="nav-signout">Sign out</button>
@@ -65,6 +66,8 @@ async function render() {
       window._hbsRealtimeChannel.unsubscribe();
       window._hbsRealtimeChannel = null;
     }
+    // Never let one character's webhook stay active once its sheet is closed.
+    setRollWebhook(null);
   }
 
   document.getElementById('nav-chars')?.addEventListener('click', async () => {
@@ -158,13 +161,52 @@ export function rollDice(count, sides) {
   return { total, rolls };
 }
 
-// Send roll result to DnDBeyond via extension
-export function sendRollToDnDBeyond(label, total, breakdown, characterName) {
-  window.postMessage({
-    type: 'HOMEBREW_SHEET_ROLL',
-    payload: { label, total, breakdown, characterName: characterName || 'Homebrew Sheet', timestamp: Date.now() },
-  }, '*');
+// ── Discord (per-character webhooks) ──────────────────────────────────────────
+// The sheet tells us which character is open by calling setRollWebhook() with
+// that character's webhook URL (or null for none). Rolls are always shown in the
+// on-screen toast; if the open character has a webhook they're also posted to it.
+let activeWebhook = null;
+
+export function setRollWebhook(url) {
+  activeWebhook = url && isValidWebhookUrl(url) ? url.trim() : null;
+}
+
+export function hasRollWebhook() {
+  return !!activeWebhook;
+}
+
+let discordToastTimer = null;
+export function showDiscordProblem(message) {
+  let el = document.getElementById('discord-problem');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'discord-problem';
+    document.body.appendChild(el);
+  }
+  el.textContent = '⚠ Discord: ' + message;
+  el.classList.add('visible');
+  clearTimeout(discordToastTimer);
+  discordToastTimer = setTimeout(() => el.classList.remove('visible'), 6000);
+}
+
+function deliver(body, meta) {
+  if (!activeWebhook) return;
+  postToDiscord(activeWebhook, body, meta).then(result => {
+    if (!result.ok) showDiscordProblem(result.error || 'The roll could not be posted.');
+  });
+}
+
+// Send a roll result: toast on screen + Discord post if this character has a webhook.
+export function sendRoll(label, total, breakdown, characterName) {
   showRollToast(label, total, breakdown);
+  deliver(buildRollBody({ characterName, label, total, breakdown }), { label, total, character: characterName });
+}
+
+// Something that doesn't roll anything (e.g. spending Nerve Dice on Covering Fire):
+// short message on screen + Discord post. `detail` is the second line.
+export function sendNotice(label, detail, characterName) {
+  showRollToast(label, '', detail || '');
+  deliver(buildNoticeBody({ characterName, label, detail }), { label, total: '', character: characterName });
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -201,7 +243,8 @@ boot();
 
 // ── Extension banner & modal ──────────────────────────────────────────────────
 
-const EXT_DISMISSED_KEY = 'hbs_ext_banner_dismissed';
+// New key (was hbs_ext_banner_dismissed) so everyone sees the Discord announcement once.
+const EXT_DISMISSED_KEY = 'hbs_discord_banner_dismissed';
 
 function renderExtensionBanner() {
   const slot = document.getElementById('ext-banner-slot');
@@ -222,13 +265,13 @@ function renderExtensionBanner() {
       flex-wrap: wrap;
     ">
       <span style="color:var(--gold);">⚔</span>
-      <span>Send rolls directly to your DnDBeyond game log — install the browser extension to get started.</span>
+      <span>Post your rolls to Discord — open a character and click the <strong style="color:var(--gold)">Discord</strong> button to add a webhook (each character can use a different server).</span>
       <button id="ext-banner-cta" class="btn btn-sm" style="
         border-color: var(--gold-dim);
         color: var(--gold);
         padding: 0.25rem 0.75rem;
         font-size: 0.8rem;
-      ">Get Extension</button>
+      ">Extension info</button>
       <button id="ext-banner-dismiss" style="
         background: none;
         border: none;
@@ -261,7 +304,7 @@ function showExtensionModal() {
       <div class="modal-title">Browser Extension</div>
 
       <p style="font-size:0.9rem; color:var(--text-dim); margin-bottom:1rem; line-height:1.6;">
-        The <strong style="color:var(--text)">Homebrew Sheet Extension</strong> shows your rolls as an overlay on DnDBeyond and optionally posts them to a Discord game log. It takes about 30 seconds to install.
+        Rolls post to Discord <strong style="color:var(--text)">without installing anything</strong> — just add a webhook to your character (see below). The <strong style="color:var(--text)">Homebrew Sheet Extension</strong> is optional: if you have it, the sheet hands your rolls to it instead of posting from the page, which can help if your browser or an ad-blocker interferes with Discord requests.
       </p>
 
       <div style="background:var(--bg-raised); border-radius:var(--radius); padding:1rem; margin-bottom:1rem;">
@@ -276,7 +319,7 @@ function showExtensionModal() {
       </div>
 
       <div style="background:var(--bg-raised); border-radius:var(--radius); padding:0.75rem 1rem; margin-bottom:1.25rem; font-size:0.85rem; color:var(--text-dim); line-height:1.6;">
-        <span style="color:var(--gold);">What it does:</span> When you roll on your character sheet, a card appears on your DnDBeyond page showing the roll result. You can also paste a Discord webhook URL into the extension popup to have rolls posted to your server automatically.
+        <span style="color:var(--gold);">Setting up Discord:</span> In your Discord server go to <strong style="color:var(--text)">Server Settings → Integrations → Webhooks → New Webhook</strong>, choose a channel and copy the Webhook URL. Then open your character here, click <strong style="color:var(--text)">Discord</strong> in the header and paste it. Every character keeps its own webhook, so you can play different characters in different servers.
       </div>
 
       <div class="modal-footer" style="justify-content:space-between;">
